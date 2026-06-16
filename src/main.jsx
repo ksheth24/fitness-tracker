@@ -325,16 +325,49 @@ function LogView({ api, flash }) {
 }
 
 function Stepper({ label, value, unit = "", step, min, onChange }) {
+  const [draft, setDraft] = useState(String(value));
+  const inputLabel = unit ? `${label} (${unit})` : label;
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  function commitInput(rawValue) {
+    setDraft(rawValue);
+    if (rawValue === "") return;
+
+    const nextValue = Number(rawValue);
+    if (!Number.isFinite(nextValue) || nextValue < min) return;
+
+    onChange(unit ? nextValue : Math.round(nextValue));
+  }
+
+  function resetInvalidInput() {
+    const nextValue = Number(draft);
+    if (!Number.isFinite(nextValue) || draft === "" || nextValue < min) {
+      setDraft(String(value));
+    }
+  }
+
   return (
     <div className="stepper">
       <span>{label}</span>
       <button title={`Decrease ${label}`} onClick={() => onChange(Math.max(min, Number(value) - step))}>
         <Minus size={25} />
       </button>
-      <strong>
-        {value}
+      <label className="stepper-value">
+        <input
+          aria-label={inputLabel}
+          inputMode={unit ? "decimal" : "numeric"}
+          min={min}
+          step={step}
+          type="number"
+          value={draft}
+          onBlur={resetInvalidInput}
+          onChange={(event) => commitInput(event.target.value)}
+        />
         {unit && <small>{unit}</small>}
-      </strong>
+      </label>
       <button title={`Increase ${label}`} onClick={() => onChange(Number(value) + step)}>
         <Plus size={25} />
       </button>

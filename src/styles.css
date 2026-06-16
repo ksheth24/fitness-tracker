@@ -197,20 +197,37 @@ h2 {
   color: #101820;
 }
 
-.stepper strong {
+.stepper-value {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: center;
   min-height: 58px;
   border-radius: 8px;
   background: #f7f4ef;
+  padding: 0 8px;
+}
+
+.stepper-value input {
+  min-height: 58px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: center;
   font-size: 28px;
+  font-weight: 800;
+}
+
+.stepper-value input:focus {
+  outline: 2px solid #101820;
+  outline-offset: -2px;
 }
 
 .stepper small {
-  margin-left: 4px;
+  flex: 0 0 auto;
+  margin-left: 5px;
   color: #687174;
   font-size: 13px;
+  font-weight: 800;
 }
 
 .primary-action {
