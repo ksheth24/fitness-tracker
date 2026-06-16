@@ -165,6 +165,7 @@ h2 {
 }
 
 .logger-panel,
+.previous-panel,
 .chart-panel,
 .auth-form {
   display: grid;
@@ -246,6 +247,44 @@ h2 {
 .log-button {
   min-height: 64px;
   font-size: 20px;
+}
+
+.previous-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.previous-summary div,
+.previous-sets div {
+  display: grid;
+  gap: 3px;
+  border-radius: 8px;
+  background: #f7f4ef;
+  padding: 10px 12px;
+}
+
+.previous-summary span,
+.previous-sets span {
+  color: #687174;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.previous-summary strong,
+.previous-sets strong {
+  color: #101820;
+  overflow-wrap: anywhere;
+}
+
+.previous-sets {
+  display: grid;
+  gap: 8px;
+}
+
+.previous-sets div {
+  grid-template-columns: 1fr auto;
+  align-items: center;
 }
 
 .list-header,

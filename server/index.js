@@ -161,6 +161,41 @@ app.delete("/api/exercises/:id", requireAuth, async (req, res) => {
   res.status(204).end();
 });
 
+app.get("/api/exercises/:id/previous-session", requireAuth, async (req, res) => {
+  if (!(await ensureOwnExercise(req.user.id, req.params.id))) {
+    return res.status(404).json({ error: "Exercise not found" });
+  }
+
+  const currentSessionId = req.query.current_session_id || null;
+  const session = await query(
+    `SELECT se.id, se.started_at
+     FROM sets st
+     JOIN sessions se ON se.id = st.session_id
+     WHERE se.user_id = $1
+       AND st.exercise_id = $2
+       AND ($3::uuid IS NULL OR se.id <> $3::uuid)
+     GROUP BY se.id
+     ORDER BY se.started_at DESC
+     LIMIT 1`,
+    [req.user.id, req.params.id, currentSessionId],
+  );
+
+  if (!session.rows[0]) return res.json({ session: null, sets: [] });
+
+  const sets = await query(
+    `SELECT st.id, st.session_id, st.exercise_id, e.name AS exercise_name,
+            st.weight, st.reps, st.set_order, st.created_at
+     FROM sets st
+     JOIN sessions se ON se.id = st.session_id
+     JOIN exercises e ON e.id = st.exercise_id
+     WHERE se.user_id = $1 AND st.session_id = $2 AND st.exercise_id = $3
+     ORDER BY st.set_order ASC`,
+    [req.user.id, session.rows[0].id, req.params.id],
+  );
+
+  res.json({ session: session.rows[0], sets: toNumberRows(sets.rows) });
+});
+
 app.get("/api/sessions/today", requireAuth, async (req, res) => {
   const session = await getOrCreateTodaySession(req.user.id);
   const sets = await setsForSession(req.user.id, session.id);

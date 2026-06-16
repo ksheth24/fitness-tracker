@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   BarChart3,
@@ -200,6 +200,8 @@ function LogView({ api, flash }) {
   const [weight, setWeight] = useState(45);
   const [reps, setReps] = useState(8);
   const [editingSet, setEditingSet] = useState(null);
+  const [previousWorkout, setPreviousWorkout] = useState({ loading: false, session: null, sets: [] });
+  const previousRequestRef = useRef(0);
 
   useEffect(() => {
     load();
@@ -210,14 +212,30 @@ function LogView({ api, flash }) {
     setSession(today.session);
     setSets(today.sets);
     setExercises(library.exercises);
-    if (!selected && library.exercises[0]) selectExercise(library.exercises[0]);
+    if (!selected && library.exercises[0]) selectExercise(library.exercises[0], today.session.id);
   }
 
-  function selectExercise(exercise) {
+  async function selectExercise(exercise, currentSessionId = session?.id) {
     setSelected(exercise);
     if (exercise.last_set) {
       setWeight(Number(exercise.last_set.weight));
       setReps(Number(exercise.last_set.reps));
+    }
+
+    const requestId = previousRequestRef.current + 1;
+    previousRequestRef.current = requestId;
+    setPreviousWorkout({ loading: true, session: null, sets: [] });
+
+    try {
+      const query = currentSessionId ? `?current_session_id=${encodeURIComponent(currentSessionId)}` : "";
+      const body = await api.get(`/exercises/${exercise.id}/previous-session${query}`);
+      if (previousRequestRef.current === requestId) {
+        setPreviousWorkout({ loading: false, session: body.session, sets: body.sets });
+      }
+    } catch {
+      if (previousRequestRef.current === requestId) {
+        setPreviousWorkout({ loading: false, session: null, sets: [] });
+      }
     }
   }
 
@@ -306,6 +324,8 @@ function LogView({ api, flash }) {
         </button>
       </div>
 
+      {selected && <PreviousWorkoutPanel workout={previousWorkout} />}
+
       <div className="list-header">
         <h2>Current Session</h2>
         <span>{sets.length} sets</span>
@@ -321,6 +341,53 @@ function LogView({ api, flash }) {
         />
       )}
     </section>
+  );
+}
+
+function PreviousWorkoutPanel({ workout }) {
+  const volume = workout.sets.reduce((total, set) => total + Number(set.weight) * Number(set.reps), 0);
+  const bestSet = workout.sets.reduce((best, set) => {
+    if (!best || Number(set.weight) > Number(best.weight)) return set;
+    return best;
+  }, null);
+
+  return (
+    <div className="previous-panel">
+      <div className="list-header">
+        <div>
+          <p className="eyebrow">Previous Workout</p>
+          <h2>{workout.session ? formatDate(workout.session.started_at) : "No prior sets"}</h2>
+        </div>
+        {workout.sets.length > 0 && <span>{workout.sets.length} sets</span>}
+      </div>
+
+      {workout.loading && <p className="empty-state">Loading previous workout...</p>}
+      {!workout.loading && workout.sets.length === 0 && (
+        <p className="empty-state">This exercise has no previous workout yet.</p>
+      )}
+      {!workout.loading && workout.sets.length > 0 && (
+        <>
+          <div className="previous-summary">
+            <div>
+              <span>Best</span>
+              <strong>{formatWeight(bestSet.weight)} x {bestSet.reps}</strong>
+            </div>
+            <div>
+              <span>Volume</span>
+              <strong>{formatWeight(volume)}</strong>
+            </div>
+          </div>
+          <div className="previous-sets">
+            {workout.sets.map((set) => (
+              <div key={set.id}>
+                <span>Set {set.set_order}</span>
+                <strong>{formatWeight(set.weight)} x {set.reps}</strong>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
