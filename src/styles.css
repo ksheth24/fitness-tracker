@@ -300,6 +300,13 @@ h2 {
   font-weight: 800;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .list-header button,
 .modal-actions button {
   min-height: 44px;
@@ -316,6 +323,12 @@ h2 {
   gap: 6px;
   background: #ffe7e9;
   color: #b32231;
+}
+
+.share-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .set-list {
@@ -484,6 +497,75 @@ h2 {
   border-radius: 8px;
   background: #fffdf9;
   padding: 16px;
+}
+
+.recap-modal {
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+
+.recap-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.recap-stats div {
+  display: grid;
+  gap: 4px;
+  border-radius: 8px;
+  background: #f7f4ef;
+  padding: 12px;
+}
+
+.recap-stats span {
+  color: #687174;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.recap-stats strong {
+  overflow-wrap: anywhere;
+  font-size: 20px;
+}
+
+.recap-text {
+  width: 100%;
+  min-height: 190px;
+  resize: vertical;
+  border: 1px solid #d9d1c3;
+  border-radius: 8px;
+  background: #fffdf9;
+  color: #101820;
+  padding: 12px;
+  font: inherit;
+  line-height: 1.45;
+}
+
+.recap-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+
+.recap-actions button,
+.message-action {
+  display: inline-flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 8px;
+  background: #ece5da;
+  color: #101820;
+  padding: 0 12px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.recap-actions .primary-action {
+  background: #e84855;
+  color: #fff;
 }
 
 .toast {

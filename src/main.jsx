@@ -4,13 +4,16 @@ import {
   BarChart3,
   CalendarDays,
   Check,
+  Copy,
   Dumbbell,
   History,
   LogOut,
+  MessageCircle,
   Minus,
   Pencil,
   Plus,
   Search,
+  Share2,
   Star,
   Trash2,
 } from "lucide-react";
@@ -200,6 +203,7 @@ function LogView({ api, flash }) {
   const [weight, setWeight] = useState(45);
   const [reps, setReps] = useState(8);
   const [editingSet, setEditingSet] = useState(null);
+  const [recapOpen, setRecapOpen] = useState(false);
   const [previousWorkout, setPreviousWorkout] = useState({ loading: false, session: null, sets: [] });
   const previousRequestRef = useRef(0);
 
@@ -328,7 +332,13 @@ function LogView({ api, flash }) {
 
       <div className="list-header">
         <h2>Current Session</h2>
-        <span>{sets.length} sets</span>
+        <div className="header-actions">
+          <span>{sets.length} sets</span>
+          <button className="share-trigger" disabled={!sets.length} onClick={() => setRecapOpen(true)}>
+            <Share2 size={18} />
+            Share
+          </button>
+        </div>
       </div>
       <SetList sets={sets} onEdit={setEditingSet} onDelete={deleteSet} />
 
@@ -338,6 +348,14 @@ function LogView({ api, flash }) {
           onChange={setEditingSet}
           onSave={saveSet}
           onCancel={() => setEditingSet(null)}
+        />
+      )}
+      {recapOpen && (
+        <WorkoutRecapModal
+          session={session}
+          sets={sets}
+          flash={flash}
+          onClose={() => setRecapOpen(false)}
         />
       )}
     </section>
@@ -555,6 +573,7 @@ function HistoryView({ api, flash }) {
   const [sessions, setSessions] = useState([]);
   const [active, setActive] = useState(null);
   const [editingSet, setEditingSet] = useState(null);
+  const [recapOpen, setRecapOpen] = useState(false);
 
   useEffect(() => {
     loadSessions();
@@ -567,12 +586,14 @@ function HistoryView({ api, flash }) {
 
   async function openSession(id) {
     setActive(await api.get(`/sessions/${id}`));
+    setRecapOpen(false);
   }
 
   async function deleteSession(id) {
     await api.delete(`/sessions/${id}`);
     setSessions(sessions.filter((session) => session.id !== id));
     setActive(null);
+    setRecapOpen(false);
     flash("Session deleted");
   }
 
@@ -611,18 +632,146 @@ function HistoryView({ api, flash }) {
         <>
           <div className="list-header">
             <button onClick={() => setActive(null)}>Sessions</button>
-            <button className="danger" onClick={() => deleteSession(active.session.id)}>
-              <Trash2 size={18} />
-              Delete
-            </button>
+            <div className="header-actions">
+              <button className="share-trigger" disabled={!active.sets.length} onClick={() => setRecapOpen(true)}>
+                <Share2 size={18} />
+                Share
+              </button>
+              <button className="danger" onClick={() => deleteSession(active.session.id)}>
+                <Trash2 size={18} />
+                Delete
+              </button>
+            </div>
           </div>
           <h2>{formatDate(active.session.started_at)}</h2>
           <SetList sets={active.sets} onEdit={setEditingSet} onDelete={deleteSet} />
         </>
       )}
       {editingSet && <EditSetModal set={editingSet} onChange={setEditingSet} onSave={saveSet} onCancel={() => setEditingSet(null)} />}
+      {recapOpen && active && (
+        <WorkoutRecapModal
+          session={active.session}
+          sets={active.sets}
+          flash={flash}
+          onClose={() => setRecapOpen(false)}
+        />
+      )}
     </section>
   );
+}
+
+function WorkoutRecapModal({ session, sets, flash, onClose }) {
+  const recap = useMemo(() => buildWorkoutRecap(session, sets), [session, sets]);
+  const canNativeShare = typeof navigator !== "undefined" && Boolean(navigator.share);
+  const smsHref = `sms:?&body=${encodeURIComponent(recap.message)}`;
+
+  async function shareRecap() {
+    if (canNativeShare) {
+      try {
+        await navigator.share({ title: "Workout recap", text: recap.message });
+        return;
+      } catch (err) {
+        if (err.name === "AbortError") return;
+      }
+    }
+    await copyRecap();
+  }
+
+  async function copyRecap() {
+    if (!navigator.clipboard) {
+      flash("Copy unavailable");
+      return;
+    }
+    await navigator.clipboard.writeText(recap.message);
+    flash("Recap copied");
+  }
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal recap-modal">
+        <div className="list-header">
+          <div>
+            <p className="eyebrow">Workout Recap</p>
+            <h2>{recap.title}</h2>
+          </div>
+          <button onClick={onClose}>Close</button>
+        </div>
+
+        <div className="recap-stats">
+          <div>
+            <span>Sets</span>
+            <strong>{recap.setCount}</strong>
+          </div>
+          <div>
+            <span>Exercises</span>
+            <strong>{recap.exerciseCount}</strong>
+          </div>
+          <div>
+            <span>Volume</span>
+            <strong>{formatWeight(recap.volume)}</strong>
+          </div>
+        </div>
+
+        <textarea className="recap-text" value={recap.message} readOnly aria-label="Workout recap message" />
+
+        <div className="recap-actions">
+          <button className="primary-action" onClick={shareRecap}>
+            <Share2 size={20} />
+            Share
+          </button>
+          <a className="message-action" href={smsHref}>
+            <MessageCircle size={20} />
+            Message
+          </a>
+          <button onClick={copyRecap}>
+            <Copy size={20} />
+            Copy
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function buildWorkoutRecap(session, sets) {
+  const grouped = sets.reduce((map, set) => {
+    const name = set.exercise_name || "Exercise";
+    if (!map.has(name)) map.set(name, []);
+    map.get(name).push(set);
+    return map;
+  }, new Map());
+  const volume = sets.reduce((total, set) => total + Number(set.weight) * Number(set.reps), 0);
+  const bestSet = sets.reduce((best, set) => {
+    const score = Number(set.weight) * Number(set.reps);
+    if (!best || score > Number(best.weight) * Number(best.reps)) return set;
+    return best;
+  }, null);
+  const title = `${formatDate(session?.started_at || new Date())} workout`;
+  const exerciseLines = [...grouped.entries()].map(([name, exerciseSets]) => {
+    const topSet = exerciseSets.reduce((best, set) => {
+      if (!best || Number(set.weight) > Number(best.weight)) return set;
+      return best;
+    }, null);
+    return `- ${name}: ${exerciseSets.length} sets, best ${formatWeight(topSet.weight)} x ${topSet.reps}`;
+  });
+  const highlight = bestSet
+    ? `Top set: ${bestSet.exercise_name} ${formatWeight(bestSet.weight)} x ${bestSet.reps}`
+    : "Top set: none yet";
+
+  return {
+    title,
+    setCount: sets.length,
+    exerciseCount: grouped.size,
+    volume,
+    message: [
+      `Workout recap - ${title}`,
+      `${sets.length} sets across ${grouped.size} exercises`,
+      `Total volume: ${formatWeight(volume)} lb`,
+      highlight,
+      "",
+      ...exerciseLines,
+    ].join("\n"),
+  };
 }
 
 function ProgressView({ api }) {
