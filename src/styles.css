@@ -79,6 +79,11 @@ h2 {
   font-size: 19px;
 }
 
+h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
 .eyebrow {
   color: #687174;
   font-size: 12px;
@@ -556,17 +561,55 @@ h2 {
   overflow-wrap: anywhere;
 }
 
-.recap-text {
-  width: 100%;
-  min-height: 190px;
-  resize: vertical;
-  border: 1px solid #d9d1c3;
+.recap-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.recap-exercise {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #ded6c8;
   border-radius: 8px;
   background: #fffdf9;
-  color: #101820;
   padding: 12px;
-  font: inherit;
-  line-height: 1.45;
+}
+
+.recap-set-list {
+  display: grid;
+  gap: 6px;
+}
+
+.recap-set-row {
+  display: grid;
+  min-height: 42px;
+  grid-template-columns: 64px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  background: #f7f4ef;
+  padding: 8px 10px;
+}
+
+.recap-set-row span {
+  color: #687174;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.recap-set-row strong {
+  overflow-wrap: anywhere;
+}
+
+.recap-set-row b {
+  min-width: 34px;
+  border-radius: 999px;
+  background: #e84855;
+  color: #fff;
+  padding: 4px 8px;
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0;
 }
 
 .recap-actions {

@@ -754,28 +754,36 @@ function WorkoutRecapModal({ api, session, sets, flash, onClose }) {
           </div>
         </div>
 
-        {(recap.prs.length > 0 || recap.newExercises.length > 0) && (
+        {recap.newExercises.length > 0 && (
           <div className="recap-highlights">
-            {recap.prs.length > 0 && (
-              <div>
-                <span>PRs</span>
-                {recap.prs.map((pr) => (
-                  <strong key={pr}>{pr}</strong>
-                ))}
-              </div>
-            )}
-            {recap.newExercises.length > 0 && (
-              <div>
-                <span>New Work</span>
-                {recap.newExercises.map((name) => (
-                  <strong key={name}>{name}</strong>
-                ))}
-              </div>
-            )}
+            <div>
+              <span>New Work</span>
+              {recap.newExercises.map((name) => (
+                <strong key={name}>{name}</strong>
+              ))}
+            </div>
           </div>
         )}
 
-        <textarea className="recap-text" value={recap.message} readOnly aria-label="Workout recap message" />
+        <div className="recap-preview" aria-label="Workout recap preview">
+          {recap.groupedExercises.map((exercise) => (
+            <section key={exercise.name} className="recap-exercise">
+              <div className="list-header">
+                <h3>{exercise.name}</h3>
+                <span>{exercise.sets.length} sets</span>
+              </div>
+              <div className="recap-set-list">
+                {exercise.sets.map((set) => (
+                  <div key={set.id} className="recap-set-row">
+                    <span>Set {set.set_order}</span>
+                    <strong>{formatWeight(set.weight)} lb x {set.reps}</strong>
+                    {set.prBadges.length > 0 && <b>PR</b>}
+                  </div>
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
 
         <div className="recap-actions">
           <button className="primary-action" disabled={loading || !sets.length} onClick={sharePdf}>
@@ -797,10 +805,26 @@ function WorkoutRecapModal({ api, session, sets, flash, onClose }) {
 }
 
 function buildWorkoutRecap(session, sets, achievements = []) {
+  const achievementByExercise = new Map(achievements.map((item) => [item.exercise_id, item]));
+  const setsWithBadges = sets.map((set) => {
+    const achievement = achievementByExercise.get(set.exercise_id);
+    const hasPriorWork = Number(achievement?.previous_set_count) > 0;
+    const estimatedOneRepMax = Number(set.weight) * (1 + Number(set.reps) / 30);
+    const prBadges = [];
+
+    if (hasPriorWork && Number(set.weight) > Number(achievement.previous_max_weight || 0)) {
+      prBadges.push("Weight PR");
+    }
+    if (hasPriorWork && estimatedOneRepMax > Number(achievement.previous_estimated_1rm || 0)) {
+      prBadges.push("Est. 1RM PR");
+    }
+
+    return { ...set, prBadges };
+  });
   const grouped = sets.reduce((map, set) => {
     const name = set.exercise_name || "Exercise";
     if (!map.has(name)) map.set(name, []);
-    map.get(name).push(set);
+    map.get(name).push(setsWithBadges.find((item) => item.id === set.id));
     return map;
   }, new Map());
   const volume = sets.reduce((total, set) => total + Number(set.weight) * Number(set.reps), 0);
@@ -813,21 +837,14 @@ function buildWorkoutRecap(session, sets, achievements = []) {
   const newExercises = achievements
     .filter((item) => Number(item.previous_set_count) === 0)
     .map((item) => item.exercise_name);
-  const prs = achievements.flatMap((item) => {
-    if (Number(item.previous_set_count) === 0) return [];
-    const callouts = [];
-    if (Number(item.max_weight) > Number(item.previous_max_weight || 0)) {
-      callouts.push(`${item.exercise_name} weight: ${formatWeight(item.max_weight)} lb`);
-    }
-    if (Number(item.estimated_1rm) > Number(item.previous_estimated_1rm || 0)) {
-      callouts.push(`${item.exercise_name} est. 1RM: ${formatWeight(item.estimated_1rm)} lb`);
-    }
-    if (Number(item.volume) > Number(item.previous_max_volume || 0)) {
-      callouts.push(`${item.exercise_name} volume: ${formatWeight(item.volume)} lb`);
-    }
-    return callouts;
-  });
-  const exerciseLines = [...grouped.entries()].map(([name, exerciseSets]) => {
+  const groupedExercises = [...grouped.entries()].map(([name, exerciseSets]) => ({
+    name,
+    sets: [...exerciseSets].sort((a, b) => Number(a.set_order) - Number(b.set_order)),
+  }));
+  const prs = setsWithBadges
+    .filter((set) => set.prBadges.length > 0)
+    .map((set) => `${set.exercise_name} set ${set.set_order}: ${formatWeight(set.weight)} lb x ${set.reps}`);
+  const exerciseLines = groupedExercises.map(({ name, sets: exerciseSets }) => {
     const topSet = exerciseSets.reduce((best, set) => {
       if (!best || Number(set.weight) > Number(best.weight)) return set;
       return best;
@@ -848,14 +865,21 @@ function buildWorkoutRecap(session, sets, achievements = []) {
       `${sets.length} sets across ${grouped.size} exercises`,
       `Total volume: ${formatWeight(volume)} lb`,
       highlight,
-      prs.length ? `PRs: ${prs.join("; ")}` : "PRs: none today",
       newExercises.length ? `New exercises: ${newExercises.join(", ")}` : "",
       "",
-      ...exerciseLines,
+      ...groupedExercises.flatMap((exercise) => [
+        exercise.name,
+        ...exercise.sets.map(
+          (set) =>
+            `- Set ${set.set_order}: ${formatWeight(set.weight)} lb x ${set.reps}${set.prBadges.length ? " PR" : ""}`,
+        ),
+      ]),
     ].filter(Boolean).join("\n"),
     summary: `${sets.length} sets, ${grouped.size} exercises, ${formatWeight(volume)} lb volume`,
     prs,
     newExercises,
+    groupedExercises,
+    exerciseLines,
   };
 }
 
@@ -880,54 +904,139 @@ function createWorkoutRecapPdf(recap) {
   const pageWidth = 612;
   const pageHeight = 792;
   const margin = 54;
-  const lines = [
-    { text: "Quick Workout Logger", size: 13 },
-    { text: recap.title, size: 24 },
-    { text: recap.summary, size: 12 },
-    { text: "", size: 12 },
-    { text: `Sets: ${recap.setCount}    Exercises: ${recap.exerciseCount}    Volume: ${formatWeight(recap.volume)} lb`, size: 12 },
-    { text: "", size: 12 },
-    { text: "Highlights", size: 16 },
-    ...(recap.prs.length ? recap.prs.map((text) => ({ text: `PR - ${text}`, size: 11 })) : [{ text: "No PRs detected against prior workout history.", size: 11 }]),
-    ...(recap.newExercises.length ? recap.newExercises.map((text) => ({ text: `New - ${text}`, size: 11 })) : []),
-    { text: "", size: 12 },
-    { text: "Exercises", size: 16 },
-    ...recap.message
-      .split("\n")
-      .filter((line) => line.startsWith("- "))
-      .map((text) => ({ text, size: 11 })),
-  ];
-  const contentLines = [];
+  const pages = [];
+  let commands = [];
   let y = pageHeight - margin;
 
-  lines.forEach((line) => {
-    wrapPdfText(line.text, line.size, pageWidth - margin * 2).forEach((wrapped) => {
-      contentLines.push(`BT /F1 ${line.size} Tf ${margin} ${y} Td (${escapePdfText(wrapped)}) Tj ET`);
-      y -= line.text ? line.size + 8 : 12;
-    });
-  });
+  function add(command) {
+    commands.push(command);
+  }
 
-  const stream = contentLines.join("\n");
-  const objects = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>`,
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
-  ];
+  function finishPage() {
+    pages.push(commands.join("\n"));
+    commands = [];
+    y = pageHeight - margin;
+  }
+
+  function ensureSpace(height) {
+    if (y - height < margin) {
+      finishPage();
+      drawPageHeader(true);
+      y -= 24;
+    }
+  }
+
+  function rect(x, rectY, width, height, color, strokeColor = null) {
+    const fill = `${pdfColor(color)} rg ${x} ${rectY} ${width} ${height} re f`;
+    add(strokeColor ? `q ${fill} ${pdfColor(strokeColor)} RG ${x} ${rectY} ${width} ${height} re S Q` : `q ${fill} Q`);
+  }
+
+  function text(value, x, textY, size, color = [16, 24, 32], font = "F1") {
+    add(`q ${pdfColor(color)} rg BT /${font} ${size} Tf ${x} ${textY} Td (${escapePdfText(value)}) Tj ET Q`);
+  }
+
+  function drawPageHeader(continued = false) {
+    rect(0, pageHeight - 124, pageWidth, 124, [16, 24, 32]);
+    rect(0, pageHeight - 124, 8, 124, [232, 72, 85]);
+    text("Quick Workout Logger", margin, pageHeight - 54, 12, [214, 220, 219], "F2");
+    text(continued ? `${recap.title} continued` : recap.title, margin, pageHeight - 84, 24, [255, 253, 249], "F2");
+    text(recap.summary, margin, pageHeight - 108, 12, [214, 220, 219], "F1");
+    y = pageHeight - 154;
+  }
+
+  function drawStatCard(x, label, value, width = 156) {
+    rect(x, y - 54, width, 54, [255, 253, 249], [222, 214, 200]);
+    text(label.toUpperCase(), x + 12, y - 20, 9, [104, 113, 116], "F2");
+    text(value, x + 12, y - 40, 18, [16, 24, 32], "F2");
+  }
+
+  function drawNewWork() {
+    if (!recap.newExercises.length) return;
+    ensureSpace(78);
+    rect(margin, y - 66, pageWidth - margin * 2, 66, [255, 244, 224], [235, 201, 134]);
+    text("NEW WORK", margin + 14, y - 22, 10, [115, 81, 0], "F2");
+    wrapPdfText(recap.newExercises.join("  |  "), 11, pageWidth - margin * 2 - 28).forEach((line, index) => {
+      text(line, margin + 14, y - 42 - index * 15, 11, [16, 24, 32], "F2");
+    });
+    y -= 82;
+  }
+
+  function drawExercise(exercise) {
+    const rowHeight = 28;
+    const sectionHeight = 46 + exercise.sets.length * rowHeight;
+    ensureSpace(sectionHeight);
+    text(exercise.name, margin, y, 16, [16, 24, 32], "F2");
+    text(`${exercise.sets.length} sets`, pageWidth - margin - 52, y, 10, [104, 113, 116], "F2");
+    y -= 18;
+    rect(margin, y - 20, pageWidth - margin * 2, 20, [236, 229, 218]);
+    text("SET", margin + 12, y - 14, 9, [89, 97, 100], "F2");
+    text("LOAD", margin + 94, y - 14, 9, [89, 97, 100], "F2");
+    text("REPS", margin + 194, y - 14, 9, [89, 97, 100], "F2");
+    text("NOTES", margin + 286, y - 14, 9, [89, 97, 100], "F2");
+    y -= 20;
+
+    exercise.sets.forEach((set, index) => {
+      const rowY = y - rowHeight;
+      rect(margin, rowY, pageWidth - margin * 2, rowHeight, index % 2 === 0 ? [255, 253, 249] : [247, 244, 239], [229, 222, 211]);
+      text(String(set.set_order), margin + 12, rowY + 10, 11, [16, 24, 32], "F2");
+      text(`${formatWeight(set.weight)} lb`, margin + 94, rowY + 10, 11, [16, 24, 32], "F2");
+      text(String(set.reps), margin + 194, rowY + 10, 11, [16, 24, 32], "F2");
+      if (set.prBadges.length > 0) {
+        rect(margin + 286, rowY + 6, 34, 16, [232, 72, 85]);
+        text("PR", margin + 297, rowY + 11, 8, [255, 255, 255], "F2");
+        text(set.prBadges.join(", "), margin + 328, rowY + 10, 10, [89, 97, 100], "F1");
+      } else {
+        text("Solid work", margin + 286, rowY + 10, 10, [104, 113, 116], "F1");
+      }
+      y -= rowHeight;
+    });
+    y -= 20;
+  }
+
+  drawPageHeader();
+  drawStatCard(margin, "Sets", String(recap.setCount));
+  drawStatCard(margin + 170, "Exercises", String(recap.exerciseCount));
+  drawStatCard(margin + 340, "Volume", `${formatWeight(recap.volume)} lb`);
+  y -= 78;
+  drawNewWork();
+  text("Workout Details", margin, y, 18, [16, 24, 32], "F2");
+  y -= 28;
+  recap.groupedExercises.forEach(drawExercise);
+  if (commands.length) finishPage();
+
+  const pageCount = pages.length;
+  const pageObjectIds = Array.from({ length: pageCount }, (_, index) => 3 + index * 2);
+  const contentObjectIds = Array.from({ length: pageCount }, (_, index) => 4 + index * 2);
+  const regularFontId = 3 + pageCount * 2;
+  const boldFontId = regularFontId + 1;
+  const objects = [];
+  objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+  objects[2] = `<< /Type /Pages /Kids [${pageObjectIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pageCount} >>`;
+  pages.forEach((stream, index) => {
+    objects[pageObjectIds[index]] =
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 ${regularFontId} 0 R /F2 ${boldFontId} 0 R >> >> /Contents ${contentObjectIds[index]} 0 R >>`;
+    objects[contentObjectIds[index]] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+  });
+  objects[regularFontId] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+  objects[boldFontId] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>";
+
   let pdf = "%PDF-1.4\n";
   const offsets = [0];
-  objects.forEach((object, index) => {
-    offsets.push(pdf.length);
-    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
-  });
+  for (let id = 1; id < objects.length; id += 1) {
+    offsets[id] = pdf.length;
+    pdf += `${id} 0 obj\n${objects[id]}\nendobj\n`;
+  }
   const xrefOffset = pdf.length;
-  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  offsets.slice(1).forEach((offset) => {
-    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
-  });
-  pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  pdf += `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+  for (let id = 1; id < objects.length; id += 1) {
+    pdf += `${String(offsets[id]).padStart(10, "0")} 00000 n \n`;
+  }
+  pdf += `trailer << /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
   return new Blob([pdf], { type: "application/pdf" });
+}
+
+function pdfColor([red, green, blue]) {
+  return `${(red / 255).toFixed(3)} ${(green / 255).toFixed(3)} ${(blue / 255).toFixed(3)}`;
 }
 
 function wrapPdfText(text, size, maxWidth) {
