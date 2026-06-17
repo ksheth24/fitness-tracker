@@ -529,6 +529,33 @@ h2 {
   font-size: 20px;
 }
 
+.recap-highlights {
+  display: grid;
+  gap: 8px;
+}
+
+.recap-highlights div {
+  display: grid;
+  gap: 6px;
+  border-left: 4px solid #e84855;
+  border-radius: 8px;
+  background: #fff4e0;
+  padding: 12px;
+}
+
+.recap-highlights span {
+  color: #735100;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.recap-highlights strong {
+  color: #101820;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
 .recap-text {
   width: 100%;
   min-height: 190px;

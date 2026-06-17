@@ -225,6 +225,73 @@ app.get("/api/sessions/:id", requireAuth, async (req, res) => {
   res.json({ session: session.rows[0], sets: await setsForSession(req.user.id, req.params.id) });
 });
 
+app.get("/api/sessions/:id/recap", requireAuth, async (req, res) => {
+  const session = await query("SELECT id, started_at, notes FROM sessions WHERE id = $1 AND user_id = $2", [
+    req.params.id,
+    req.user.id,
+  ]);
+  if (!session.rows[0]) return res.status(404).json({ error: "Session not found" });
+
+  const sets = await setsForSession(req.user.id, req.params.id);
+  const achievements = await query(
+    `WITH current_exercises AS (
+       SELECT st.exercise_id, e.name AS exercise_name,
+              MAX(st.weight)::numeric AS max_weight,
+              MAX(st.weight * (1 + st.reps / 30.0))::numeric AS estimated_1rm,
+              SUM(st.weight * st.reps)::numeric AS volume,
+              COUNT(st.id)::int AS set_count
+       FROM sets st
+       JOIN exercises e ON e.id = st.exercise_id
+       WHERE st.session_id = $1
+       GROUP BY st.exercise_id, e.name
+     ),
+     prior AS (
+       SELECT st.exercise_id,
+              MAX(st.weight)::numeric AS previous_max_weight,
+              MAX(st.weight * (1 + st.reps / 30.0))::numeric AS previous_estimated_1rm,
+              COUNT(st.id)::int AS previous_set_count
+       FROM sets st
+       JOIN sessions se ON se.id = st.session_id
+       JOIN sessions current_session ON current_session.id = $1
+       WHERE se.user_id = $2
+         AND se.id <> $1
+         AND se.started_at < current_session.started_at
+       GROUP BY st.exercise_id
+     ),
+     prior_volume AS (
+       SELECT exercise_id, MAX(volume)::numeric AS previous_max_volume
+       FROM (
+         SELECT st.exercise_id, se.started_at::date AS workout_date,
+                SUM(st.weight * st.reps)::numeric AS volume
+         FROM sets st
+         JOIN sessions se ON se.id = st.session_id
+         JOIN sessions current_session ON current_session.id = $1
+         WHERE se.user_id = $2
+           AND se.id <> $1
+           AND se.started_at < current_session.started_at
+         GROUP BY st.exercise_id, se.started_at::date
+       ) daily_volume
+       GROUP BY exercise_id
+     )
+     SELECT ce.exercise_id, ce.exercise_name, ce.max_weight, ce.estimated_1rm,
+            ce.volume, ce.set_count,
+            prior.previous_max_weight, prior.previous_estimated_1rm,
+            prior_volume.previous_max_volume,
+            COALESCE(prior.previous_set_count, 0)::int AS previous_set_count
+     FROM current_exercises ce
+     LEFT JOIN prior ON prior.exercise_id = ce.exercise_id
+     LEFT JOIN prior_volume ON prior_volume.exercise_id = ce.exercise_id
+     ORDER BY ce.exercise_name ASC`,
+    [req.params.id, req.user.id],
+  );
+
+  res.json({
+    session: session.rows[0],
+    sets,
+    achievements: toNumberRows(achievements.rows),
+  });
+});
+
 app.patch("/api/sessions/:id", requireAuth, async (req, res) => {
   const result = await query(
     "UPDATE sessions SET notes = $3 WHERE id = $1 AND user_id = $2 RETURNING id, started_at, notes",

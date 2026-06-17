@@ -352,6 +352,7 @@ function LogView({ api, flash }) {
       )}
       {recapOpen && (
         <WorkoutRecapModal
+          api={api}
           session={session}
           sets={sets}
           flash={flash}
@@ -650,6 +651,7 @@ function HistoryView({ api, flash }) {
       {editingSet && <EditSetModal set={editingSet} onChange={setEditingSet} onSave={saveSet} onCancel={() => setEditingSet(null)} />}
       {recapOpen && active && (
         <WorkoutRecapModal
+          api={api}
           session={active.session}
           sets={active.sets}
           flash={flash}
@@ -660,15 +662,55 @@ function HistoryView({ api, flash }) {
   );
 }
 
-function WorkoutRecapModal({ session, sets, flash, onClose }) {
-  const recap = useMemo(() => buildWorkoutRecap(session, sets), [session, sets]);
+function WorkoutRecapModal({ api, session, sets, flash, onClose }) {
+  const [recapData, setRecapData] = useState({ sets, achievements: [] });
+  const [loading, setLoading] = useState(false);
+  const recap = useMemo(
+    () => buildWorkoutRecap(recapData.session || session, recapData.sets, recapData.achievements),
+    [recapData, session],
+  );
   const canNativeShare = typeof navigator !== "undefined" && Boolean(navigator.share);
-  const smsHref = `sms:?&body=${encodeURIComponent(recap.message)}`;
 
-  async function shareRecap() {
+  useEffect(() => {
+    let isCurrent = true;
+    if (!session?.id) return undefined;
+
+    setLoading(true);
+    api
+      .get(`/sessions/${session.id}/recap`)
+      .then((body) => {
+        if (isCurrent) setRecapData(body);
+      })
+      .catch(() => {
+        if (isCurrent) flash("Using basic recap");
+      })
+      .finally(() => {
+        if (isCurrent) setLoading(false);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [api, session?.id]);
+
+  async function sharePdf() {
+    const file = recapFile(recap);
+    if (canNativeShare && navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ title: recap.title, text: recap.summary, files: [file] });
+        return;
+      } catch (err) {
+        if (err.name === "AbortError") return;
+      }
+    }
+    downloadPdf(file);
+    flash("PDF downloaded");
+  }
+
+  async function shareText() {
     if (canNativeShare) {
       try {
-        await navigator.share({ title: "Workout recap", text: recap.message });
+        await navigator.share({ title: recap.title, text: recap.message });
         return;
       } catch (err) {
         if (err.name === "AbortError") return;
@@ -712,20 +754,41 @@ function WorkoutRecapModal({ session, sets, flash, onClose }) {
           </div>
         </div>
 
+        {(recap.prs.length > 0 || recap.newExercises.length > 0) && (
+          <div className="recap-highlights">
+            {recap.prs.length > 0 && (
+              <div>
+                <span>PRs</span>
+                {recap.prs.map((pr) => (
+                  <strong key={pr}>{pr}</strong>
+                ))}
+              </div>
+            )}
+            {recap.newExercises.length > 0 && (
+              <div>
+                <span>New Work</span>
+                {recap.newExercises.map((name) => (
+                  <strong key={name}>{name}</strong>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <textarea className="recap-text" value={recap.message} readOnly aria-label="Workout recap message" />
 
         <div className="recap-actions">
-          <button className="primary-action" onClick={shareRecap}>
+          <button className="primary-action" disabled={loading || !sets.length} onClick={sharePdf}>
             <Share2 size={20} />
-            Share
+            PDF
           </button>
-          <a className="message-action" href={smsHref}>
+          <button className="message-action" disabled={loading || !sets.length} onClick={sharePdf}>
             <MessageCircle size={20} />
             Message
-          </a>
-          <button onClick={copyRecap}>
+          </button>
+          <button onClick={shareText}>
             <Copy size={20} />
-            Copy
+            Text
           </button>
         </div>
       </div>
@@ -733,7 +796,7 @@ function WorkoutRecapModal({ session, sets, flash, onClose }) {
   );
 }
 
-function buildWorkoutRecap(session, sets) {
+function buildWorkoutRecap(session, sets, achievements = []) {
   const grouped = sets.reduce((map, set) => {
     const name = set.exercise_name || "Exercise";
     if (!map.has(name)) map.set(name, []);
@@ -747,6 +810,23 @@ function buildWorkoutRecap(session, sets) {
     return best;
   }, null);
   const title = `${formatDate(session?.started_at || new Date())} workout`;
+  const newExercises = achievements
+    .filter((item) => Number(item.previous_set_count) === 0)
+    .map((item) => item.exercise_name);
+  const prs = achievements.flatMap((item) => {
+    if (Number(item.previous_set_count) === 0) return [];
+    const callouts = [];
+    if (Number(item.max_weight) > Number(item.previous_max_weight || 0)) {
+      callouts.push(`${item.exercise_name} weight: ${formatWeight(item.max_weight)} lb`);
+    }
+    if (Number(item.estimated_1rm) > Number(item.previous_estimated_1rm || 0)) {
+      callouts.push(`${item.exercise_name} est. 1RM: ${formatWeight(item.estimated_1rm)} lb`);
+    }
+    if (Number(item.volume) > Number(item.previous_max_volume || 0)) {
+      callouts.push(`${item.exercise_name} volume: ${formatWeight(item.volume)} lb`);
+    }
+    return callouts;
+  });
   const exerciseLines = [...grouped.entries()].map(([name, exerciseSets]) => {
     const topSet = exerciseSets.reduce((best, set) => {
       if (!best || Number(set.weight) > Number(best.weight)) return set;
@@ -768,10 +848,109 @@ function buildWorkoutRecap(session, sets) {
       `${sets.length} sets across ${grouped.size} exercises`,
       `Total volume: ${formatWeight(volume)} lb`,
       highlight,
+      prs.length ? `PRs: ${prs.join("; ")}` : "PRs: none today",
+      newExercises.length ? `New exercises: ${newExercises.join(", ")}` : "",
       "",
       ...exerciseLines,
-    ].join("\n"),
+    ].filter(Boolean).join("\n"),
+    summary: `${sets.length} sets, ${grouped.size} exercises, ${formatWeight(volume)} lb volume`,
+    prs,
+    newExercises,
   };
+}
+
+function recapFile(recap) {
+  const blob = createWorkoutRecapPdf(recap);
+  const datePart = new Date().toISOString().slice(0, 10);
+  return new File([blob], `workout-recap-${datePart}.pdf`, { type: "application/pdf" });
+}
+
+function downloadPdf(file) {
+  const url = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = file.name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function createWorkoutRecapPdf(recap) {
+  const pageWidth = 612;
+  const pageHeight = 792;
+  const margin = 54;
+  const lines = [
+    { text: "Quick Workout Logger", size: 13 },
+    { text: recap.title, size: 24 },
+    { text: recap.summary, size: 12 },
+    { text: "", size: 12 },
+    { text: `Sets: ${recap.setCount}    Exercises: ${recap.exerciseCount}    Volume: ${formatWeight(recap.volume)} lb`, size: 12 },
+    { text: "", size: 12 },
+    { text: "Highlights", size: 16 },
+    ...(recap.prs.length ? recap.prs.map((text) => ({ text: `PR - ${text}`, size: 11 })) : [{ text: "No PRs detected against prior workout history.", size: 11 }]),
+    ...(recap.newExercises.length ? recap.newExercises.map((text) => ({ text: `New - ${text}`, size: 11 })) : []),
+    { text: "", size: 12 },
+    { text: "Exercises", size: 16 },
+    ...recap.message
+      .split("\n")
+      .filter((line) => line.startsWith("- "))
+      .map((text) => ({ text, size: 11 })),
+  ];
+  const contentLines = [];
+  let y = pageHeight - margin;
+
+  lines.forEach((line) => {
+    wrapPdfText(line.text, line.size, pageWidth - margin * 2).forEach((wrapped) => {
+      contentLines.push(`BT /F1 ${line.size} Tf ${margin} ${y} Td (${escapePdfText(wrapped)}) Tj ET`);
+      y -= line.text ? line.size + 8 : 12;
+    });
+  });
+
+  const stream = contentLines.join("\n");
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  offsets.slice(1).forEach((offset) => {
+    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  });
+  pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return new Blob([pdf], { type: "application/pdf" });
+}
+
+function wrapPdfText(text, size, maxWidth) {
+  if (!text) return [""];
+  const approxChars = Math.max(24, Math.floor(maxWidth / (size * 0.52)));
+  const words = text.split(" ");
+  const lines = [];
+  let line = "";
+  words.forEach((word) => {
+    const next = line ? `${line} ${word}` : word;
+    if (next.length > approxChars && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = next;
+    }
+  });
+  if (line) lines.push(line);
+  return lines;
+}
+
+function escapePdfText(value) {
+  return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 }
 
 function ProgressView({ api }) {
