@@ -12,6 +12,7 @@ const app = express();
 const port = process.env.PORT || 3001;
 const jwtSecret = process.env.JWT_SECRET || "dev-secret-change-me";
 const resetTokenTtlMinutes = 30;
+const muscleGroups = new Set(["legs", "shoulders", "biceps", "triceps", "back", "chest", "abs"]);
 
 app.use(cors());
 app.use(express.json());
@@ -29,6 +30,14 @@ function resetUrlFor(req, token) {
   const url = new URL(baseUrl);
   url.searchParams.set("resetToken", token);
   return url.toString();
+}
+
+function normalizeMuscleGroup(value) {
+  if (value === undefined) return undefined;
+  const muscleGroup = (value || "").toString().trim().toLowerCase();
+  if (!muscleGroup) return null;
+  if (!muscleGroups.has(muscleGroup)) throw new Error("Invalid muscle group");
+  return muscleGroup;
 }
 
 function requireAuth(req, res, next) {
@@ -55,29 +64,19 @@ function toNumberRows(rows) {
   }));
 }
 
-async function getOrCreateTodaySession(userId) {
-  const existing = await query(
-    `SELECT id, user_id, started_at, notes
-     FROM sessions
-     WHERE user_id = $1 AND started_at::date = CURRENT_DATE
-     ORDER BY started_at DESC
-     LIMIT 1`,
-    [userId],
-  );
-  if (existing.rows[0]) return existing.rows[0];
-
-  const created = await query(
-    "INSERT INTO sessions (user_id) VALUES ($1) RETURNING id, user_id, started_at, notes",
-    [userId],
-  );
-  return created.rows[0];
-}
-
 async function ensureOwnExercise(userId, exerciseId) {
   const result = await query("SELECT id FROM exercises WHERE id = $1 AND user_id = $2", [
     exerciseId,
     userId,
   ]);
+  return result.rows[0];
+}
+
+async function ensureOwnSession(userId, sessionId) {
+  const result = await query(
+    "SELECT id, user_id, started_at, ended_at, is_explicit, notes FROM sessions WHERE id = $1 AND user_id = $2",
+    [sessionId, userId],
+  );
   return result.rows[0];
 }
 
@@ -177,7 +176,7 @@ app.get("/api/me", requireAuth, async (req, res) => {
 app.get("/api/exercises", requireAuth, async (req, res) => {
   const search = `%${(req.query.search || "").toString().trim()}%`;
   const result = await query(
-    `SELECT e.id, e.name, e.is_favorite, e.created_at,
+    `SELECT e.id, e.name, e.muscle_group, e.is_favorite, e.created_at,
       MAX(s.created_at) AS last_logged_at,
       (
         SELECT json_build_object('weight', s2.weight, 'reps', s2.reps)
@@ -201,25 +200,41 @@ app.get("/api/exercises", requireAuth, async (req, res) => {
 app.post("/api/exercises", requireAuth, async (req, res) => {
   const name = (req.body.name || "").trim();
   if (!name) return res.status(400).json({ error: "Exercise name is required" });
+  let muscleGroup;
+  try {
+    muscleGroup = normalizeMuscleGroup(req.body.muscle_group);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
 
   const result = await query(
-    `INSERT INTO exercises (user_id, name, is_favorite)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (user_id, (lower(name))) DO UPDATE SET name = EXCLUDED.name
-     RETURNING id, name, is_favorite, created_at`,
-    [req.user.id, name, Boolean(req.body.is_favorite)],
+    `INSERT INTO exercises (user_id, name, muscle_group, is_favorite)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (user_id, (lower(name))) DO UPDATE
+       SET name = EXCLUDED.name,
+           muscle_group = COALESCE(EXCLUDED.muscle_group, exercises.muscle_group)
+     RETURNING id, name, muscle_group, is_favorite, created_at`,
+    [req.user.id, name, muscleGroup ?? null, Boolean(req.body.is_favorite)],
   );
   res.status(201).json({ exercise: result.rows[0] });
 });
 
 app.patch("/api/exercises/:id", requireAuth, async (req, res) => {
+  let muscleGroup;
+  try {
+    muscleGroup = normalizeMuscleGroup(req.body.muscle_group);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+  const hasMuscleGroup = req.body.muscle_group !== undefined;
   const result = await query(
     `UPDATE exercises
      SET name = COALESCE(NULLIF($3, ''), name),
-         is_favorite = COALESCE($4, is_favorite)
+         is_favorite = COALESCE($4, is_favorite),
+         muscle_group = CASE WHEN $5::boolean THEN $6 ELSE muscle_group END
      WHERE id = $1 AND user_id = $2
-     RETURNING id, name, is_favorite, created_at`,
-    [req.params.id, req.user.id, req.body.name?.trim() || null, req.body.is_favorite],
+     RETURNING id, name, muscle_group, is_favorite, created_at`,
+    [req.params.id, req.user.id, req.body.name?.trim() || null, req.body.is_favorite, hasMuscleGroup, muscleGroup ?? null],
   );
   if (!result.rows[0]) return res.status(404).json({ error: "Exercise not found" });
   res.json({ exercise: result.rows[0] });
@@ -265,15 +280,41 @@ app.get("/api/exercises/:id/previous-session", requireAuth, async (req, res) => 
   res.json({ session: session.rows[0], sets: toNumberRows(sets.rows) });
 });
 
-app.get("/api/sessions/today", requireAuth, async (req, res) => {
-  const session = await getOrCreateTodaySession(req.user.id);
-  const sets = await setsForSession(req.user.id, session.id);
-  res.json({ session, sets });
+app.get("/api/sessions/active", requireAuth, async (req, res) => {
+  const result = await query(
+    `SELECT id, user_id, started_at, ended_at, is_explicit, notes
+     FROM sessions
+     WHERE user_id = $1 AND ended_at IS NULL AND is_explicit = true
+     ORDER BY started_at DESC
+     LIMIT 1`,
+    [req.user.id],
+  );
+  const session = result.rows[0] || null;
+  res.json({ session, sets: session ? await setsForSession(req.user.id, session.id) : [] });
+});
+
+app.post("/api/sessions", requireAuth, async (req, res) => {
+  const active = await query(
+    "SELECT id FROM sessions WHERE user_id = $1 AND ended_at IS NULL AND is_explicit = true LIMIT 1",
+    [req.user.id],
+  );
+  if (active.rows[0]) return res.status(409).json({ error: "Finish the active workout before starting another" });
+
+  const startedAt = req.body.started_at ? new Date(req.body.started_at) : new Date();
+  if (Number.isNaN(startedAt.getTime())) return res.status(400).json({ error: "Invalid start date" });
+
+  const result = await query(
+    `INSERT INTO sessions (user_id, started_at, notes, is_explicit)
+     VALUES ($1, $2, $3, true)
+     RETURNING id, user_id, started_at, ended_at, is_explicit, notes`,
+    [req.user.id, startedAt.toISOString(), req.body.notes || null],
+  );
+  res.status(201).json({ session: result.rows[0], sets: [] });
 });
 
 app.get("/api/sessions", requireAuth, async (req, res) => {
   const result = await query(
-    `SELECT se.id, se.started_at, se.notes, COUNT(st.id)::int AS set_count,
+    `SELECT se.id, se.started_at, se.ended_at, se.is_explicit, se.notes, COUNT(st.id)::int AS set_count,
             COALESCE(SUM(st.weight * st.reps), 0)::numeric AS volume
      FROM sessions se
      LEFT JOIN sets st ON st.session_id = se.id
@@ -286,7 +327,7 @@ app.get("/api/sessions", requireAuth, async (req, res) => {
 });
 
 app.get("/api/sessions/:id", requireAuth, async (req, res) => {
-  const session = await query("SELECT id, started_at, notes FROM sessions WHERE id = $1 AND user_id = $2", [
+  const session = await query("SELECT id, started_at, ended_at, is_explicit, notes FROM sessions WHERE id = $1 AND user_id = $2", [
     req.params.id,
     req.user.id,
   ]);
@@ -295,7 +336,7 @@ app.get("/api/sessions/:id", requireAuth, async (req, res) => {
 });
 
 app.get("/api/sessions/:id/recap", requireAuth, async (req, res) => {
-  const session = await query("SELECT id, started_at, notes FROM sessions WHERE id = $1 AND user_id = $2", [
+  const session = await query("SELECT id, started_at, ended_at, is_explicit, notes FROM sessions WHERE id = $1 AND user_id = $2", [
     req.params.id,
     req.user.id,
   ]);
@@ -362,11 +403,51 @@ app.get("/api/sessions/:id/recap", requireAuth, async (req, res) => {
 });
 
 app.patch("/api/sessions/:id", requireAuth, async (req, res) => {
+  const startedAt = req.body.started_at === undefined ? undefined : new Date(req.body.started_at);
+  const endedAt =
+    req.body.ended_at === undefined || req.body.ended_at === null ? req.body.ended_at : new Date(req.body.ended_at);
+  if (startedAt !== undefined && Number.isNaN(startedAt.getTime())) {
+    return res.status(400).json({ error: "Invalid start date" });
+  }
+  if (endedAt instanceof Date && Number.isNaN(endedAt.getTime())) {
+    return res.status(400).json({ error: "Invalid end date" });
+  }
+
   const result = await query(
-    "UPDATE sessions SET notes = $3 WHERE id = $1 AND user_id = $2 RETURNING id, started_at, notes",
-    [req.params.id, req.user.id, req.body.notes || null],
+    `UPDATE sessions
+     SET notes = COALESCE($3, notes),
+         started_at = COALESCE($4, started_at),
+         ended_at = CASE WHEN $5::boolean THEN $6::timestamptz ELSE ended_at END
+     WHERE id = $1 AND user_id = $2
+     RETURNING id, started_at, ended_at, is_explicit, notes`,
+    [
+      req.params.id,
+      req.user.id,
+      req.body.notes === undefined ? null : req.body.notes || null,
+      startedAt === undefined ? null : startedAt.toISOString(),
+      req.body.ended_at !== undefined,
+      endedAt === null || endedAt === undefined ? null : endedAt.toISOString(),
+    ],
   );
   if (!result.rows[0]) return res.status(404).json({ error: "Session not found" });
+  res.json({ session: result.rows[0] });
+});
+
+app.patch("/api/sessions/:id/end", requireAuth, async (req, res) => {
+  const session = await ensureOwnSession(req.user.id, req.params.id);
+  if (!session) return res.status(404).json({ error: "Session not found" });
+  if (session.ended_at) return res.status(400).json({ error: "Workout is already ended" });
+
+  const endedAt = req.body.ended_at ? new Date(req.body.ended_at) : new Date();
+  if (Number.isNaN(endedAt.getTime())) return res.status(400).json({ error: "Invalid end date" });
+
+  const result = await query(
+    `UPDATE sessions
+     SET ended_at = GREATEST($3::timestamptz, started_at)
+     WHERE id = $1 AND user_id = $2
+     RETURNING id, started_at, ended_at, is_explicit, notes`,
+    [req.params.id, req.user.id, endedAt.toISOString()],
+  );
   res.json({ session: result.rows[0] });
 });
 
@@ -377,20 +458,20 @@ app.delete("/api/sessions/:id", requireAuth, async (req, res) => {
 
 app.post("/api/sets", requireAuth, async (req, res) => {
   const { exercise_id: exerciseId } = req.body;
+  const sessionId = req.body.session_id;
   const weight = Number(req.body.weight);
   const reps = Number.parseInt(req.body.reps, 10);
-  if (!exerciseId || !Number.isFinite(weight) || !Number.isInteger(reps) || reps < 1) {
-    return res.status(400).json({ error: "Exercise, weight, and reps are required" });
+  if (!sessionId || !exerciseId || !Number.isFinite(weight) || !Number.isInteger(reps) || reps < 1) {
+    return res.status(400).json({ error: "Workout, exercise, weight, and reps are required" });
   }
   if (!(await ensureOwnExercise(req.user.id, exerciseId))) {
     return res.status(404).json({ error: "Exercise not found" });
   }
 
-  const session = req.body.session_id
-    ? (await query("SELECT id FROM sessions WHERE id = $1 AND user_id = $2", [req.body.session_id, req.user.id]))
-        .rows[0]
-    : await getOrCreateTodaySession(req.user.id);
+  const session = await ensureOwnSession(req.user.id, sessionId);
   if (!session) return res.status(404).json({ error: "Session not found" });
+  if (!session.is_explicit) return res.status(400).json({ error: "Start a new workout before logging sets" });
+  if (session.ended_at) return res.status(400).json({ error: "Cannot log sets to an ended workout" });
 
   const orderResult = await query(
     "SELECT COALESCE(MAX(set_order), 0) + 1 AS next_order FROM sets WHERE session_id = $1",
@@ -406,6 +487,26 @@ app.post("/api/sets", requireAuth, async (req, res) => {
 });
 
 app.patch("/api/sets/:id", requireAuth, async (req, res) => {
+  if (req.body.session_id) {
+    const targetSession = await ensureOwnSession(req.user.id, req.body.session_id);
+    if (!targetSession) return res.status(404).json({ error: "Target workout not found" });
+
+    const orderResult = await query(
+      "SELECT COALESCE(MAX(set_order), 0) + 1 AS next_order FROM sets WHERE session_id = $1",
+      [targetSession.id],
+    );
+    const moved = await query(
+      `UPDATE sets st
+       SET session_id = $3, set_order = $4
+       FROM sessions se
+       WHERE st.session_id = se.id AND st.id = $1 AND se.user_id = $2
+       RETURNING st.id, st.session_id, st.exercise_id, st.weight, st.reps, st.set_order, st.created_at`,
+      [req.params.id, req.user.id, targetSession.id, Number(orderResult.rows[0].next_order)],
+    );
+    if (!moved.rows[0]) return res.status(404).json({ error: "Set not found" });
+    return res.json({ set: toNumberRows(moved.rows)[0] });
+  }
+
   const result = await query(
     `UPDATE sets st
      SET weight = COALESCE($3, st.weight),

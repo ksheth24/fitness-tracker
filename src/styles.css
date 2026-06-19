@@ -21,7 +21,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -43,6 +44,16 @@ input {
   background: #fffdf9;
   color: #101820;
   padding: 0 14px;
+}
+
+select {
+  min-height: 48px;
+  border: 1px solid #d9d1c3;
+  border-radius: 8px;
+  background: #fffdf9;
+  color: #101820;
+  padding: 0 12px;
+  font-weight: 800;
 }
 
 .app-shell {
@@ -136,6 +147,25 @@ h3 {
   scrollbar-width: none;
 }
 
+.exercise-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.exercise-group {
+  display: grid;
+  gap: 7px;
+}
+
+.exercise-picker-group {
+  padding: 8px 10px;
+}
+
+.grouped-picker {
+  margin-inline: 0;
+  padding-inline: 0;
+}
+
 .exercise-chip {
   display: inline-flex;
   align-items: center;
@@ -167,6 +197,13 @@ h3 {
 .exercise-chip.add {
   border-color: #e84855;
   color: #e84855;
+}
+
+.add-exercise-panel {
+  display: grid;
+  grid-template-columns: minmax(132px, auto) 1fr;
+  gap: 8px;
+  align-items: center;
 }
 
 .logger-panel,
@@ -252,6 +289,21 @@ h3 {
 .log-button {
   min-height: 64px;
   font-size: 20px;
+}
+
+.workout-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.end-workout {
+  min-height: 64px;
+  border-radius: 8px;
+  background: #101820;
+  color: #fffdf9;
+  padding: 0 14px;
+  font-weight: 900;
 }
 
 .previous-summary {
@@ -341,6 +393,50 @@ h3 {
   gap: 9px;
 }
 
+.set-group {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #ded6c8;
+  border-radius: 8px;
+  background: #fffdf9;
+  padding: 10px;
+}
+
+.set-group-header {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  border-radius: 8px;
+  background: transparent;
+  color: #101820;
+  padding: 0;
+  text-align: left;
+}
+
+.set-group-header h3 {
+  overflow-wrap: anywhere;
+}
+
+.set-group-header span {
+  color: #687174;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.collapse-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  background: #ece5da;
+  color: #101820;
+}
+
 .set-row,
 .session-row {
   display: flex;
@@ -352,6 +448,34 @@ h3 {
   border-radius: 8px;
   background: #fffdf9;
   padding: 10px 12px;
+}
+
+.set-row.grouped {
+  min-height: 58px;
+  border-color: #ece5da;
+  background: #f7f4ef;
+}
+
+.session-target {
+  display: grid;
+  min-height: 64px;
+  gap: 3px;
+  border: 1px solid #ded6c8;
+  border-radius: 8px;
+  background: #fffdf9;
+  color: #101820;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.session-target span {
+  color: #687174;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.session-target strong {
+  overflow-wrap: anywhere;
 }
 
 .set-row > div:first-child,
@@ -393,7 +517,7 @@ h3 {
 
 .inline-create {
   display: grid;
-  grid-template-columns: 1fr 52px;
+  grid-template-columns: 1fr minmax(118px, 150px) 52px;
   gap: 8px;
 }
 
@@ -403,6 +527,11 @@ h3 {
   background: transparent;
   padding: 0;
   font-weight: 800;
+}
+
+.muscle-select {
+  width: min(42vw, 150px);
+  flex: 0 0 auto;
 }
 
 .bottom-nav {
@@ -742,5 +871,20 @@ h3 {
 
   .logger-panel {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .inline-create {
+    grid-template-columns: 1fr 52px;
+  }
+
+  .inline-create select {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .set-row {
+    flex-wrap: wrap;
   }
 }
