@@ -485,6 +485,30 @@ h3 {
   font-weight: 800;
 }
 
+.success {
+  color: #155238;
+  font-weight: 800;
+}
+
+.reset-link,
+.text-action {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #ece5da;
+  color: #101820;
+  padding: 0 13px;
+  text-align: center;
+  text-decoration: none;
+  font-weight: 900;
+}
+
+.text-action {
+  width: 100%;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;

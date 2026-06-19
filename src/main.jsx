@@ -7,7 +7,9 @@ import {
   Copy,
   Dumbbell,
   History,
+  KeyRound,
   LogOut,
+  Mail,
   MessageCircle,
   Minus,
   Pencil,
@@ -132,14 +134,31 @@ const navItems = [
 ];
 
 function AuthScreen({ api, onAuth }) {
-  const [mode, setMode] = useState("login");
+  const resetToken = new URLSearchParams(window.location.search).get("resetToken");
+  const [mode, setMode] = useState(resetToken ? "reset" : "login");
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [resetLink, setResetLink] = useState("");
 
   async function submit(event) {
     event.preventDefault();
     setError("");
+    setNotice("");
+    setResetLink("");
     try {
+      if (mode === "forgot") {
+        const body = await api.post("/auth/forgot-password", { email: form.email });
+        setNotice(body.message);
+        if (body.reset_url) setResetLink(body.reset_url);
+        return;
+      }
+      if (mode === "reset") {
+        const body = await api.post("/auth/reset-password", { token: resetToken, password: form.password });
+        window.history.replaceState({}, "", window.location.pathname);
+        onAuth(body);
+        return;
+      }
       const body = await api.post(`/auth/${mode === "login" ? "login" : "register"}`, form);
       onAuth(body);
     } catch (err) {
@@ -147,48 +166,80 @@ function AuthScreen({ api, onAuth }) {
     }
   }
 
+  function switchMode(nextMode) {
+    setMode(nextMode);
+    setError("");
+    setNotice("");
+    setResetLink("");
+  }
+
+  const title =
+    mode === "forgot" ? "Reset password" : mode === "reset" ? "Choose new password" : "Quick Workout Logger";
+
   return (
     <div className="auth-screen">
       <div className="brand-mark">
         <Dumbbell size={38} />
       </div>
-      <h1>Quick Workout Logger</h1>
+      <h1>{title}</h1>
       <form className="auth-form" onSubmit={submit}>
-        <div className="segmented">
-          <button type="button" className={mode === "login" ? "selected" : ""} onClick={() => setMode("login")}>
-            Sign in
-          </button>
-          <button type="button" className={mode === "register" ? "selected" : ""} onClick={() => setMode("register")}>
-            Create
-          </button>
-        </div>
+        {mode !== "forgot" && mode !== "reset" && (
+          <div className="segmented">
+            <button type="button" className={mode === "login" ? "selected" : ""} onClick={() => switchMode("login")}>
+              Sign in
+            </button>
+            <button type="button" className={mode === "register" ? "selected" : ""} onClick={() => switchMode("register")}>
+              Create
+            </button>
+          </div>
+        )}
         {mode === "register" && (
           <input
             value={form.name}
             placeholder="Name"
             autoComplete="name"
-            onChange={(event) => setForm({ ...form, name: event.target.value })}
+              onChange={(event) => setForm({ ...form, name: event.target.value })}
           />
         )}
-        <input
-          value={form.email}
-          placeholder="Email"
-          type="email"
-          autoComplete="email"
-          onChange={(event) => setForm({ ...form, email: event.target.value })}
-        />
-        <input
-          value={form.password}
-          placeholder="Password"
-          type="password"
-          autoComplete={mode === "login" ? "current-password" : "new-password"}
-          onChange={(event) => setForm({ ...form, password: event.target.value })}
-        />
+        {mode !== "reset" && (
+          <input
+            value={form.email}
+            placeholder="Email"
+            type="email"
+            autoComplete="email"
+            onChange={(event) => setForm({ ...form, email: event.target.value })}
+          />
+        )}
+        {mode !== "forgot" && (
+          <input
+            value={form.password}
+            placeholder={mode === "reset" ? "New password" : "Password"}
+            type="password"
+            autoComplete={mode === "login" ? "current-password" : "new-password"}
+            onChange={(event) => setForm({ ...form, password: event.target.value })}
+          />
+        )}
+        {notice && <p className="success">{notice}</p>}
+        {resetLink && (
+          <a className="reset-link" href={resetLink}>
+            Open reset link
+          </a>
+        )}
         {error && <p className="error">{error}</p>}
         <button className="primary-action" type="submit">
-          <Check size={22} />
-          {mode === "login" ? "Sign in" : "Create account"}
+          {mode === "forgot" ? <Mail size={22} /> : mode === "reset" ? <KeyRound size={22} /> : <Check size={22} />}
+          {mode === "forgot" ? "Send reset link" : mode === "reset" ? "Update password" : mode === "login" ? "Sign in" : "Create account"}
         </button>
+        {mode === "login" && (
+          <button className="text-action" type="button" onClick={() => switchMode("forgot")}>
+            Forgot password?
+          </button>
+        )}
+        {mode === "forgot" && (
+          <button className="text-action" type="button" onClick={() => switchMode("login")}>
+            Back to sign in
+          </button>
+        )}
       </form>
     </div>
   );

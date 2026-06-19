@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
 import cors from "cors";
+import crypto from "node:crypto";
 import dotenv from "dotenv";
 import express from "express";
 import jwt from "jsonwebtoken";
@@ -10,12 +11,24 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3001;
 const jwtSecret = process.env.JWT_SECRET || "dev-secret-change-me";
+const resetTokenTtlMinutes = 30;
 
 app.use(cors());
 app.use(express.json());
 
 function tokenFor(user) {
   return jwt.sign({ sub: user.id, email: user.email }, jwtSecret, { expiresIn: "30d" });
+}
+
+function hashResetToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+function resetUrlFor(req, token) {
+  const baseUrl = process.env.APP_URL || req.get("origin") || `${req.protocol}://${req.get("host")}`;
+  const url = new URL(baseUrl);
+  url.searchParams.set("resetToken", token);
+  return url.toString();
 }
 
 function requireAuth(req, res, next) {
@@ -98,6 +111,62 @@ app.post("/api/auth/login", async (req, res) => {
     return res.status(401).json({ error: "Invalid email or password" });
   }
   res.json({ user: { id: user.id, name: user.name, email: user.email }, token: tokenFor(user) });
+});
+
+app.post("/api/auth/forgot-password", async (req, res) => {
+  const email = (req.body.email || "").trim();
+  if (!email) return res.status(400).json({ error: "Email is required" });
+
+  const result = await query("SELECT id, email FROM users WHERE email = lower($1)", [email]);
+  const user = result.rows[0];
+  let reset_url = null;
+
+  if (user) {
+    const token = crypto.randomBytes(32).toString("hex");
+    const tokenHash = hashResetToken(token);
+    await query(
+      `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+       VALUES ($1, $2, now() + ($3::text || ' minutes')::interval)`,
+      [user.id, tokenHash, resetTokenTtlMinutes],
+    );
+    reset_url = resetUrlFor(req, token);
+    console.log(`Password reset link for ${user.email}: ${reset_url}`);
+  }
+
+  res.json({
+    message: "If that email exists, a password reset link has been created.",
+    ...(reset_url ? { reset_url } : {}),
+  });
+});
+
+app.post("/api/auth/reset-password", async (req, res) => {
+  const token = (req.body.token || "").trim();
+  const password = req.body.password || "";
+  if (!token || !password) return res.status(400).json({ error: "Token and password are required" });
+  if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
+
+  const tokenHash = hashResetToken(token);
+  const tokenResult = await query(
+    `SELECT prt.id, prt.user_id, u.name, u.email
+     FROM password_reset_tokens prt
+     JOIN users u ON u.id = prt.user_id
+     WHERE prt.token_hash = $1 AND prt.used_at IS NULL AND prt.expires_at > now()
+     LIMIT 1`,
+    [tokenHash],
+  );
+  const resetToken = tokenResult.rows[0];
+  if (!resetToken) return res.status(400).json({ error: "Reset link is invalid or expired" });
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  await query("UPDATE users SET password_hash = $1 WHERE id = $2", [passwordHash, resetToken.user_id]);
+  await query("UPDATE password_reset_tokens SET used_at = now() WHERE id = $1", [resetToken.id]);
+  await query(
+    "UPDATE password_reset_tokens SET used_at = now() WHERE user_id = $1 AND used_at IS NULL",
+    [resetToken.user_id],
+  );
+
+  const user = { id: resetToken.user_id, name: resetToken.name, email: resetToken.email };
+  res.json({ user, token: tokenFor(user) });
 });
 
 app.get("/api/me", requireAuth, async (req, res) => {

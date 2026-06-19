@@ -34,8 +34,19 @@ CREATE TABLE IF NOT EXISTS sets (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_exercises_user ON exercises(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_exercises_user_lower_name ON exercises(user_id, lower(name));
 CREATE INDEX IF NOT EXISTS idx_sessions_user_started ON sessions(user_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sets_session_order ON sets(session_id, set_order);
 CREATE INDEX IF NOT EXISTS idx_sets_exercise_created ON sets(exercise_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user ON password_reset_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires ON password_reset_tokens(expires_at);
