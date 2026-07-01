@@ -471,7 +471,9 @@ app.post("/api/sets", requireAuth, async (req, res) => {
   const session = await ensureOwnSession(req.user.id, sessionId);
   if (!session) return res.status(404).json({ error: "Session not found" });
   if (!session.is_explicit) return res.status(400).json({ error: "Start a new workout before logging sets" });
-  if (session.ended_at) return res.status(400).json({ error: "Cannot log sets to an ended workout" });
+  if (session.ended_at && !req.body.allow_ended) {
+    return res.status(400).json({ error: "Cannot log sets to an ended workout" });
+  }
 
   const orderResult = await query(
     "SELECT COALESCE(MAX(set_order), 0) + 1 AS next_order FROM sets WHERE session_id = $1",

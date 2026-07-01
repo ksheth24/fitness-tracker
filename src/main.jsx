@@ -696,6 +696,53 @@ function EditSetModal({ set, onChange, onSave, onCancel }) {
   );
 }
 
+function AddSetModal({ exercises, onSave, onCancel }) {
+  const [exerciseId, setExerciseId] = useState(exercises[0]?.id || "");
+  const selectedExercise = exercises.find((exercise) => exercise.id === exerciseId);
+  const [weight, setWeight] = useState(Number(selectedExercise?.last_set?.weight) || 45);
+  const [reps, setReps] = useState(Number(selectedExercise?.last_set?.reps) || 8);
+
+  useEffect(() => {
+    if (!selectedExercise?.last_set) return;
+    setWeight(Number(selectedExercise.last_set.weight));
+    setReps(Number(selectedExercise.last_set.reps));
+  }, [selectedExercise?.id]);
+
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <div>
+          <p className="eyebrow">Add Missing Set</p>
+          <h2>{selectedExercise?.name || "Choose exercise"}</h2>
+        </div>
+        <label className="field-label">
+          <span>Exercise</span>
+          <select value={exerciseId} onChange={(event) => setExerciseId(event.target.value)}>
+            {exercises.map((exercise) => (
+              <option key={exercise.id} value={exercise.id}>
+                {exercise.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Stepper label="Weight" value={weight} unit="lb" step={5} min={0} onChange={setWeight} />
+        <Stepper label="Reps" value={reps} step={1} min={1} onChange={setReps} />
+        <div className="modal-actions">
+          <button onClick={onCancel}>Cancel</button>
+          <button
+            className="primary-action"
+            disabled={!exerciseId}
+            onClick={() => onSave({ exerciseId, weight, reps })}
+          >
+            <Check size={20} />
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MoveSetModal({ set, sessions, currentSessionId, onMove, onCancel }) {
   const targets = sessions.filter((session) => session.id !== currentSessionId);
 
@@ -841,14 +888,22 @@ function ExercisesView({ api, flash }) {
 
 function HistoryView({ api, flash }) {
   const [sessions, setSessions] = useState([]);
+  const [exercises, setExercises] = useState([]);
   const [active, setActive] = useState(null);
   const [editingSet, setEditingSet] = useState(null);
+  const [addingSet, setAddingSet] = useState(false);
   const [movingSet, setMovingSet] = useState(null);
   const [recapOpen, setRecapOpen] = useState(false);
 
   useEffect(() => {
-    loadSessions();
+    loadHistory();
   }, []);
+
+  async function loadHistory() {
+    const [sessionBody, exerciseBody] = await Promise.all([api.get("/sessions"), api.get("/exercises")]);
+    setSessions(sessionBody.sessions);
+    setExercises(exerciseBody.exercises);
+  }
 
   async function loadSessions() {
     const body = await api.get("/sessions");
@@ -883,6 +938,35 @@ function HistoryView({ api, flash }) {
       sets: active.sets.map((set) => (set.id === editingSet.id ? { ...set, ...updated.set } : set)),
     });
     setEditingSet(null);
+  }
+
+  async function addSet({ exerciseId, weight, reps }) {
+    if (!active) return;
+
+    const { set } = await api.post("/sets", {
+      session_id: active.session.id,
+      exercise_id: exerciseId,
+      weight,
+      reps,
+      allow_ended: true,
+    });
+    const exercise = exercises.find((item) => item.id === exerciseId);
+    const nextSet = { ...set, exercise_name: exercise?.name || "Exercise" };
+    const nextSets = [nextSet, ...active.sets];
+    setActive({ ...active, sets: nextSets });
+    setSessions(
+      sessions.map((session) =>
+        session.id === active.session.id
+          ? {
+              ...session,
+              set_count: Number(session.set_count) + 1,
+              volume: Number(session.volume) + Number(weight) * Number(reps),
+            }
+          : session,
+      ),
+    );
+    setAddingSet(false);
+    flash("Set added");
   }
 
   async function moveSet(targetSessionId) {
@@ -938,6 +1022,10 @@ function HistoryView({ api, flash }) {
           <div className="list-header">
             <button onClick={() => setActive(null)}>Sessions</button>
             <div className="header-actions">
+              <button className="share-trigger" onClick={() => setAddingSet(true)}>
+                <Plus size={18} />
+                Add Set
+              </button>
               <button className="share-trigger" disabled={!active.sets.length} onClick={() => setRecapOpen(true)}>
                 <Share2 size={18} />
                 Share
@@ -956,6 +1044,13 @@ function HistoryView({ api, flash }) {
         </>
       )}
       {editingSet && <EditSetModal set={editingSet} onChange={setEditingSet} onSave={saveSet} onCancel={() => setEditingSet(null)} />}
+      {addingSet && (
+        <AddSetModal
+          exercises={exercises}
+          onSave={addSet}
+          onCancel={() => setAddingSet(false)}
+        />
+      )}
       {movingSet && (
         <MoveSetModal
           set={movingSet}
@@ -1422,18 +1517,62 @@ function ProgressView({ api }) {
       <Chart title="Max Weight" data={progress.series} dataKey="max_weight" />
       <Chart title="Estimated 1RM" data={progress.series} dataKey="estimated_1rm" />
       <Chart title="Volume" data={progress.series} dataKey="volume" />
-      <div className="chart-panel">
-        <div className="list-header">
-          <h2>Workout Frequency</h2>
-          <CalendarDays size={20} />
-        </div>
-        <div className="heatmap">
-          {frequency.slice(-84).map((day) => (
-            <span key={day.date} title={`${formatDate(day.date)}: ${day.count}`} data-count={Math.min(day.count, 4)} />
-          ))}
-        </div>
-      </div>
+      <WorkoutCalendar frequency={frequency} />
     </section>
+  );
+}
+
+function WorkoutCalendar({ frequency }) {
+  const months = useMemo(() => buildWorkoutMonths(frequency), [frequency]);
+  const workoutDays = frequency.filter((day) => Number(day.count) > 0).length;
+  const workoutCount = frequency.reduce((total, day) => total + Number(day.count || 0), 0);
+
+  return (
+    <div className="chart-panel workout-calendar-panel">
+      <div className="list-header">
+        <div>
+          <h2>Workout Calendar</h2>
+          <span>
+            {workoutDays} active {workoutDays === 1 ? "day" : "days"} - {workoutCount}{" "}
+            {workoutCount === 1 ? "workout" : "workouts"}
+          </span>
+        </div>
+        <CalendarDays size={20} />
+      </div>
+      <div className="calendar-legend">
+        <span className="legend-swatch" />
+        <span>Green days have workouts</span>
+      </div>
+      <div className="workout-months">
+        {months.map((month) => (
+          <section className="workout-month" key={month.key} aria-label={month.label}>
+            <h3>{month.label}</h3>
+            <div className="calendar-weekdays" aria-hidden="true">
+              {["S", "M", "T", "W", "T", "F", "S"].map((day, index) => (
+                <span key={`${day}-${index}`}>{day}</span>
+              ))}
+            </div>
+            <div className="calendar-grid">
+              {month.days.map((day) =>
+                day.empty ? (
+                  <span className="calendar-day empty" key={day.key} />
+                ) : (
+                  <span
+                    className={day.count > 0 ? "calendar-day trained" : "calendar-day"}
+                    data-today={day.isToday ? "true" : undefined}
+                    key={day.key}
+                    title={`${day.label}: ${day.count} ${day.count === 1 ? "workout" : "workouts"}`}
+                    aria-label={`${day.label}: ${day.count} ${day.count === 1 ? "workout" : "workouts"}`}
+                  >
+                    {day.day}
+                  </span>
+                ),
+              )}
+            </div>
+          </section>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1445,15 +1584,103 @@ function Chart({ title, data, dataKey }) {
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data}>
             <CartesianGrid stroke="#e4ded3" />
-            <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+            <XAxis
+              dataKey="date"
+              interval="preserveStartEnd"
+              minTickGap={24}
+              tick={{ fontSize: 11 }}
+              tickFormatter={formatChartDate}
+            />
             <YAxis tick={{ fontSize: 11 }} width={38} />
-            <Tooltip />
+            <Tooltip labelFormatter={formatCalendarDateValue} />
             <Line type="monotone" dataKey={dataKey} stroke="#e84855" strokeWidth={3} dot={{ r: 4 }} />
           </LineChart>
         </ResponsiveContainer>
       </div>
     </div>
   );
+}
+
+function buildWorkoutMonths(frequency) {
+  const counts = new Map();
+  frequency.forEach((day) => {
+    const key = getDateKey(day.date);
+    counts.set(key, (counts.get(key) || 0) + Number(day.count || 0));
+  });
+
+  const today = new Date();
+  const todayKey = getDateKey(today);
+  const keys = [...counts.keys()].sort();
+  const firstDate = keys[0] ? parseDateKey(keys[0]) : today;
+  const start = new Date(firstDate.getFullYear(), firstDate.getMonth(), 1);
+  const end = new Date(today.getFullYear(), today.getMonth(), 1);
+  const months = [];
+
+  for (let cursor = new Date(start); cursor <= end; cursor.setMonth(cursor.getMonth() + 1)) {
+    months.push(buildWorkoutMonth(cursor, counts, todayKey));
+  }
+
+  return months.reverse();
+}
+
+function buildWorkoutMonth(monthDate, counts, todayKey) {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const days = [];
+
+  for (let index = 0; index < firstDay.getDay(); index += 1) {
+    days.push({ empty: true, key: `blank-${year}-${month}-${index}` });
+  }
+
+  for (let day = 1; day <= lastDay.getDate(); day += 1) {
+    const date = new Date(year, month, day);
+    const key = getDateKey(date);
+    days.push({
+      count: counts.get(key) || 0,
+      day,
+      isToday: key === todayKey,
+      key,
+      label: formatCalendarDate(date),
+    });
+  }
+
+  return {
+    days,
+    key: `${year}-${String(month + 1).padStart(2, "0")}`,
+    label: monthDate.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
+  };
+}
+
+function getDateKey(value) {
+  if (typeof value === "string") {
+    const match = value.match(/^\d{4}-\d{2}-\d{2}/);
+    if (match) return match[0];
+  }
+  const date = value instanceof Date ? value : new Date(value);
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function parseDateKey(key) {
+  const [year, month, day] = key.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function formatCalendarDate(value) {
+  return value.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatCalendarDateValue(value) {
+  return formatCalendarDate(parseDateKey(getDateKey(value)));
+}
+
+function formatChartDate(value) {
+  return parseDateKey(getDateKey(value)).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function formatWeight(value) {

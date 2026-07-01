@@ -357,6 +357,18 @@ h3 {
   font-weight: 800;
 }
 
+.field-label {
+  display: grid;
+  gap: 7px;
+}
+
+.field-label span {
+  color: #687174;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .header-actions {
   display: flex;
   align-items: center;
@@ -836,32 +848,82 @@ h3 {
   height: 230px;
 }
 
-.heatmap {
+.workout-calendar-panel .list-header {
+  align-items: flex-start;
+}
+
+.workout-calendar-panel .list-header > div {
   display: grid;
-  grid-template-columns: repeat(12, 1fr);
+  gap: 4px;
+}
+
+.calendar-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #596164;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.legend-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: #237a4d;
+}
+
+.workout-months {
+  display: grid;
+  gap: 14px;
+}
+
+.workout-month {
+  display: grid;
+  gap: 10px;
+}
+
+.calendar-weekdays,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 5px;
 }
 
-.heatmap span {
+.calendar-weekdays span {
+  color: #687174;
+  font-size: 11px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.calendar-day {
+  display: grid;
+  min-width: 0;
   aspect-ratio: 1;
-  border-radius: 4px;
-  background: #ece5da;
+  place-items: center;
+  border: 1px solid #e4ded3;
+  border-radius: 8px;
+  background: #f7f4ef;
+  color: #596164;
+  font-size: 13px;
+  font-weight: 900;
 }
 
-.heatmap span[data-count="1"] {
-  background: #bfd7b5;
+.calendar-day.trained {
+  border-color: #237a4d;
+  background: #237a4d;
+  color: #fffdf9;
 }
 
-.heatmap span[data-count="2"] {
-  background: #75a86b;
+.calendar-day[data-today="true"] {
+  outline: 2px solid #101820;
+  outline-offset: 2px;
 }
 
-.heatmap span[data-count="3"] {
-  background: #347a4f;
-}
-
-.heatmap span[data-count="4"] {
-  background: #155238;
+.calendar-day.empty {
+  border-color: transparent;
+  background: transparent;
 }
 
 @media (min-width: 760px) {
