@@ -11,20 +11,35 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3001;
 const jwtSecret = process.env.JWT_SECRET || "dev-secret-change-me";
-const allowedOrigins = (process.env.FRONTEND_URL || "http://localhost:5173")
+const allowedOriginEntries = (process.env.FRONTEND_URL || process.env.APP_URL || "http://localhost:5173")
   .split(",")
   .map((origin) => origin.trim().replace(/\/$/, ""))
   .filter(Boolean);
+const allowedOrigins = new Set(allowedOriginEntries.filter((origin) => !origin.includes("*")));
+const allowedOriginPatterns = allowedOriginEntries
+  .filter((origin) => origin.includes("*"))
+  .map(
+    (origin) =>
+      new RegExp(
+        `^${origin
+          .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+          .replaceAll("*", "[^.]+")}$`,
+        "i",
+      ),
+  );
 const resetTokenTtlMinutes = 30;
 const muscleGroups = new Set(["legs", "shoulders", "biceps", "triceps", "back", "chest", "abs"]);
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  const normalizedOrigin = origin.replace(/\/$/, "");
+  return allowedOrigins.has(normalizedOrigin) || allowedOriginPatterns.some((pattern) => pattern.test(normalizedOrigin));
+}
 
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin.replace(/\/$/, ""))) {
-        return callback(null, true);
-      }
-      return callback(new Error("Origin is not allowed by CORS"));
+      callback(null, isAllowedOrigin(origin));
     },
   }),
 );

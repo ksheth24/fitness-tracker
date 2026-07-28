@@ -47,7 +47,7 @@ Set this Vercel build-time environment variable, replacing the hostname with the
 VITE_API_URL=https://your-service.region.awsapprunner.com/api
 ```
 
-Redeploy the Vercel project after changing `VITE_API_URL`. If the frontend has multiple permanent domains, provide them as a comma-separated `FRONTEND_URL` value in App Runner.
+Redeploy the frontend after changing `VITE_API_URL`. If it has multiple permanent domains, provide them as a comma-separated `FRONTEND_URL` value. Preview domains can use a single-label wildcard such as `https://*.your-team.vercel.app`. When `FRONTEND_URL` is omitted, the API accepts the origin configured in `APP_URL`.
 
 ## Features
 
