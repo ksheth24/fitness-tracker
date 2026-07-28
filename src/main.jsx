@@ -90,12 +90,49 @@ function App() {
 
   if (!auth) return <AuthScreen api={api} onAuth={saveAuth} />;
 
+  const activeNav = navItems.find((item) => item.id === tab);
+
   return (
     <div className="app-shell">
+      <aside className="side-nav">
+        <div className="side-brand">
+          <span className="side-brand-mark"><Dumbbell size={22} /></span>
+          <span>
+            <strong>Form</strong>
+            <small>Workout tracker</small>
+          </span>
+        </div>
+        <nav aria-label="Primary navigation">
+          {navItems.map((item) => (
+            <button key={item.id} className={tab === item.id ? "active" : ""} onClick={() => setTab(item.id)}>
+              <item.icon size={20} />
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="side-profile">
+          <span className="profile-avatar">{(auth.user?.name || auth.name || "A").slice(0, 1).toUpperCase()}</span>
+          <span>
+            <strong>{auth.user?.name || auth.name || "Athlete"}</strong>
+            <small>Keep showing up</small>
+          </span>
+          <button
+            className="side-signout"
+            title="Sign out"
+            onClick={() => {
+              localStorage.removeItem(storageKey);
+              setAuth(null);
+            }}
+          >
+            <LogOut size={18} />
+          </button>
+        </div>
+      </aside>
+      <div className="app-content">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Quick Workout Logger</p>
-          <h1>{tab === "log" ? "Log Set" : navItems.find((item) => item.id === tab)?.label}</h1>
+          <p className="eyebrow">{activeNav?.kicker}</p>
+          <h1>{activeNav?.title}</h1>
         </div>
         <button
           className="icon-button"
@@ -125,15 +162,16 @@ function App() {
         ))}
       </nav>
       {toast && <div className="toast">{toast}</div>}
+      </div>
     </div>
   );
 }
 
 const navItems = [
-  { id: "log", label: "Log", icon: Dumbbell },
-  { id: "exercises", label: "Library", icon: Star },
-  { id: "history", label: "History", icon: History },
-  { id: "progress", label: "Progress", icon: BarChart3 },
+  { id: "log", label: "Train", title: "Today’s workout", kicker: "Ready when you are", icon: Dumbbell },
+  { id: "exercises", label: "Exercises", title: "Exercise library", kicker: "Build your movement list", icon: Star },
+  { id: "history", label: "History", title: "Workout history", kicker: "Every session, in one place", icon: History },
+  { id: "progress", label: "Progress", title: "Your progress", kicker: "Consistency compounds", icon: BarChart3 },
 ];
 
 function AuthScreen({ api, onAuth }) {
@@ -181,11 +219,19 @@ function AuthScreen({ api, onAuth }) {
 
   return (
     <div className="auth-screen">
-      <div className="brand-mark">
-        <Dumbbell size={38} />
+      <div className="auth-intro">
+        <div className="brand-mark">
+          <Dumbbell size={30} />
+        </div>
+        <p className="eyebrow">Train with intention</p>
+        <h1>FORM</h1>
+        <p>Log faster. Lift smarter. See the work add up.</p>
       </div>
-      <h1>{title}</h1>
       <form className="auth-form" onSubmit={submit}>
+        <div className="auth-heading">
+          <p className="eyebrow">Your training space</p>
+          <h2>{title}</h2>
+        </div>
         {mode !== "forgot" && mode !== "reset" && (
           <div className="segmented">
             <button type="button" className={mode === "login" ? "selected" : ""} onClick={() => switchMode("login")}>
@@ -398,10 +444,46 @@ function LogView({ api, flash }) {
   const groupedExercises = groupExercisesByMuscle(filtered);
 
   return (
-    <section className="stack">
+    <section className="stack training-view">
+      <div className="logger-panel">
+        <div className="logger-heading">
+          <div>
+            <p className="eyebrow">{session ? `Live · ${formatDateTime(session.started_at)}` : "New session"}</p>
+            <h2>{session ? selected?.name || "Pick an exercise" : "Ready to train?"}</h2>
+          </div>
+          {session && <span className="live-badge">{sets.length} sets</span>}
+        </div>
+        {session ? (
+          <>
+            <div className="set-composer">
+              <Stepper label="Weight" value={weight} unit="lb" step={5} min={0} onChange={setWeight} />
+              <Stepper label="Reps" value={reps} step={1} min={1} onChange={setReps} />
+            </div>
+            <div className="workout-actions">
+              <button className="primary-action log-button" disabled={!selected} onClick={logSet}>
+                <Check size={24} />
+                Add set
+              </button>
+              <button className="end-workout" onClick={endWorkout}>
+                Finish
+              </button>
+            </div>
+          </>
+        ) : (
+          <button className="primary-action log-button" onClick={startWorkout}>
+            <Plus size={24} />
+            Start workout
+          </button>
+        )}
+      </div>
+
+      <div className="section-kicker">
+        <span>Exercise</span>
+        <small>{selected ? selected.name : "Choose one to continue"}</small>
+      </div>
       <div className="search-row">
         <Search size={20} />
-        <input value={search} placeholder="Find or add exercise" onChange={(event) => setSearch(event.target.value)} />
+        <input value={search} placeholder="Search your exercises" onChange={(event) => setSearch(event.target.value)} />
       </div>
 
       <div className="exercise-groups">
@@ -456,37 +538,13 @@ function LogView({ api, flash }) {
         )}
       </div>
 
-      <div className="logger-panel">
-        <div>
-          <p className="eyebrow">{session ? `Started ${formatDateTime(session.started_at)}` : "No active workout"}</p>
-          <h2>{session ? selected?.name || "Choose exercise" : "Start a workout first"}</h2>
-        </div>
-        {session ? (
-          <>
-            <Stepper label="Weight" value={weight} unit="lb" step={5} min={0} onChange={setWeight} />
-            <Stepper label="Reps" value={reps} step={1} min={1} onChange={setReps} />
-            <div className="workout-actions">
-              <button className="primary-action log-button" disabled={!selected} onClick={logSet}>
-                <Check size={24} />
-                Log Set
-              </button>
-              <button className="end-workout" onClick={endWorkout}>
-                End Workout
-              </button>
-            </div>
-          </>
-        ) : (
-          <button className="primary-action log-button" onClick={startWorkout}>
-            <Plus size={24} />
-            Start Workout
-          </button>
-        )}
-      </div>
-
       {selected && <PreviousWorkoutPanel workout={previousWorkout} />}
 
-      <div className="list-header">
-        <h2>Active Workout</h2>
+      <div className="list-header active-header">
+        <div>
+          <p className="eyebrow">Session log</p>
+          <h2>Sets so far</h2>
+        </div>
         <div className="header-actions">
           <span>{sets.length} sets</span>
           <button className="share-trigger" disabled={!sets.length} onClick={() => setRecapOpen(true)}>
