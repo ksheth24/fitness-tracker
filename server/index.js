@@ -589,13 +589,15 @@ app.get("/api/progress/:exerciseId", requireAuth, async (req, res) => {
     [req.user.id, req.params.exerciseId],
   );
   const pr = await query(
-    `SELECT MAX(st.weight)::numeric AS max_weight
+    `SELECT st.weight::numeric AS max_weight, st.reps
      FROM sets st
      JOIN sessions se ON se.id = st.session_id
-     WHERE se.user_id = $1 AND st.exercise_id = $2`,
+     WHERE se.user_id = $1 AND st.exercise_id = $2
+     ORDER BY st.weight DESC, st.reps DESC, st.created_at DESC
+     LIMIT 1`,
     [req.user.id, req.params.exerciseId],
   );
-  res.json({ series: toNumberRows(series.rows), pr: toNumberRows(pr.rows)[0] });
+  res.json({ series: toNumberRows(series.rows), pr: toNumberRows(pr.rows)[0] || { max_weight: null, reps: null } });
 });
 
 async function setsForSession(userId, sessionId) {

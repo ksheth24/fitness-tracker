@@ -408,7 +408,10 @@ function LogView({ api, flash, insightMode }) {
         loading: false,
         session: previous.session || null,
         sets: previous.sets || [],
-        pr: progress.pr?.max_weight ?? null,
+        pr:
+          progress.pr?.max_weight == null
+            ? null
+            : { weight: Number(progress.pr.max_weight), reps: Number(progress.pr.reps) },
       });
     }
   }
@@ -625,8 +628,8 @@ function ExerciseInsightPanel({ insight, mode }) {
       {insight.loading && <p className="empty-state">Loading exercise stats...</p>}
       {!insight.loading && showPr && (
         <div className="pr-display">
-          <span>All-time best weight</span>
-          <strong>{insight.pr == null ? "No PR yet" : `${formatWeight(insight.pr)} lb`}</strong>
+          <span>All-time best set</span>
+          <strong>{insight.pr == null ? "No PR yet" : formatLoad(insight.pr)}</strong>
         </div>
       )}
       {!insight.loading && showPrevious && insight.sets.length === 0 && (
