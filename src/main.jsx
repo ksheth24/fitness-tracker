@@ -18,6 +18,7 @@ import {
   Plus,
   Search,
   Share2,
+  SlidersHorizontal,
   Star,
   Trash2,
 } from "lucide-react";
@@ -34,6 +35,7 @@ import "./styles.css";
 
 const API_URL = import.meta.env.VITE_API_URL || "/api";
 const storageKey = "qwl-auth";
+const settingsStorageKey = "qwl-settings";
 const muscleGroupOptions = ["legs", "shoulders", "biceps", "triceps", "back", "chest", "abs"];
 
 function apiClient(token, onUnauthorized) {
@@ -65,6 +67,10 @@ function App() {
   const [auth, setAuth] = useState(() => JSON.parse(localStorage.getItem(storageKey) || "null"));
   const [tab, setTab] = useState("log");
   const [toast, setToast] = useState("");
+  const [settings, setSettings] = useState(() => {
+    const saved = JSON.parse(localStorage.getItem(settingsStorageKey) || "null");
+    return { exerciseInsight: saved?.exerciseInsight || "previous" };
+  });
   const api = useMemo(
     () =>
       apiClient(auth?.token, () => {
@@ -86,6 +92,12 @@ function App() {
   function flash(message) {
     setToast(message);
     window.setTimeout(() => setToast(""), 1800);
+  }
+
+  function updateSettings(nextSettings) {
+    setSettings(nextSettings);
+    localStorage.setItem(settingsStorageKey, JSON.stringify(nextSettings));
+    flash("Setting saved");
   }
 
   if (!auth) return <AuthScreen api={api} onAuth={saveAuth} />;
@@ -147,10 +159,11 @@ function App() {
       </header>
 
       <main>
-        {tab === "log" && <LogView api={api} flash={flash} />}
+        {tab === "log" && <LogView api={api} flash={flash} insightMode={settings.exerciseInsight} />}
         {tab === "exercises" && <ExercisesView api={api} flash={flash} />}
         {tab === "history" && <HistoryView api={api} flash={flash} />}
         {tab === "progress" && <ProgressView api={api} />}
+        {tab === "settings" && <SettingsView settings={settings} onChange={updateSettings} />}
       </main>
 
       <nav className="bottom-nav" aria-label="Primary navigation">
@@ -172,6 +185,7 @@ const navItems = [
   { id: "exercises", label: "Exercises", title: "Exercise library", kicker: "Build your movement list", icon: Star },
   { id: "history", label: "History", title: "Workout history", kicker: "Every session, in one place", icon: History },
   { id: "progress", label: "Progress", title: "Your progress", kicker: "Consistency compounds", icon: BarChart3 },
+  { id: "settings", label: "Settings", title: "Your settings", kicker: "Make the app yours", icon: SlidersHorizontal },
 ];
 
 function AuthScreen({ api, onAuth }) {
@@ -306,7 +320,7 @@ function AuthScreen({ api, onAuth }) {
   );
 }
 
-function LogView({ api, flash }) {
+function LogView({ api, flash, insightMode }) {
   const [exercises, setExercises] = useState([]);
   const [sets, setSets] = useState([]);
   const [session, setSession] = useState(null);
@@ -318,12 +332,16 @@ function LogView({ api, flash }) {
   const [reps, setReps] = useState(8);
   const [editingSet, setEditingSet] = useState(null);
   const [recapOpen, setRecapOpen] = useState(false);
-  const [previousWorkout, setPreviousWorkout] = useState({ loading: false, session: null, sets: [] });
+  const [exerciseInsight, setExerciseInsight] = useState({ loading: false, session: null, sets: [], pr: null });
   const previousRequestRef = useRef(0);
 
   useEffect(() => {
     load();
   }, []);
+
+  useEffect(() => {
+    if (selected) loadExerciseInsight(selected, session?.id);
+  }, [insightMode]);
 
   async function load() {
     const [activeWorkout, library] = await Promise.all([api.get("/sessions/active"), api.get("/exercises")]);
@@ -353,7 +371,7 @@ function LogView({ api, flash }) {
       setSession(null);
       setSets([]);
       setRecapOpen(false);
-      setPreviousWorkout({ loading: false, session: null, sets: [] });
+      setExerciseInsight({ loading: false, session: null, sets: [], pr: null });
       flash(`Workout ended: ${formatDate(body.session.started_at)}`);
       await load();
     } catch (err) {
@@ -369,20 +387,29 @@ function LogView({ api, flash }) {
       setReps(Number(exercise.last_set.reps));
     }
 
+    loadExerciseInsight(exercise, currentSessionId);
+  }
+
+  async function loadExerciseInsight(exercise, currentSessionId = session?.id) {
     const requestId = previousRequestRef.current + 1;
     previousRequestRef.current = requestId;
-    setPreviousWorkout({ loading: true, session: null, sets: [] });
+    setExerciseInsight((current) => ({ ...current, loading: true }));
 
-    try {
-      const query = currentSessionId ? `?current_session_id=${encodeURIComponent(currentSessionId)}` : "";
-      const body = await api.get(`/exercises/${exercise.id}/previous-session${query}`);
-      if (previousRequestRef.current === requestId) {
-        setPreviousWorkout({ loading: false, session: body.session, sets: body.sets });
-      }
-    } catch {
-      if (previousRequestRef.current === requestId) {
-        setPreviousWorkout({ loading: false, session: null, sets: [] });
-      }
+    const query = currentSessionId ? `?current_session_id=${encodeURIComponent(currentSessionId)}` : "";
+    const [previousResult, progressResult] = await Promise.allSettled([
+      api.get(`/exercises/${exercise.id}/previous-session${query}`),
+      api.get(`/progress/${exercise.id}`),
+    ]);
+
+    if (previousRequestRef.current === requestId) {
+      const previous = previousResult.status === "fulfilled" ? previousResult.value : {};
+      const progress = progressResult.status === "fulfilled" ? progressResult.value : {};
+      setExerciseInsight({
+        loading: false,
+        session: previous.session || null,
+        sets: previous.sets || [],
+        pr: progress.pr?.max_weight ?? null,
+      });
     }
   }
 
@@ -538,7 +565,7 @@ function LogView({ api, flash }) {
         )}
       </div>
 
-      {selected && <PreviousWorkoutPanel workout={previousWorkout} />}
+      {selected && <ExerciseInsightPanel insight={exerciseInsight} mode={insightMode} />}
 
       <div className="list-header active-header">
         <div>
@@ -576,9 +603,11 @@ function LogView({ api, flash }) {
   );
 }
 
-function PreviousWorkoutPanel({ workout }) {
-  const volume = workout.sets.reduce((total, set) => total + Number(set.weight) * Number(set.reps), 0);
-  const bestSet = workout.sets.reduce((best, set) => {
+function ExerciseInsightPanel({ insight, mode }) {
+  const showPrevious = mode === "previous" || mode === "both";
+  const showPr = mode === "pr" || mode === "both";
+  const volume = insight.sets.reduce((total, set) => total + Number(set.weight) * Number(set.reps), 0);
+  const bestSet = insight.sets.reduce((best, set) => {
     if (!best || Number(set.weight) > Number(best.weight)) return set;
     return best;
   }, null);
@@ -587,18 +616,25 @@ function PreviousWorkoutPanel({ workout }) {
     <div className="previous-panel">
       <div className="list-header">
         <div>
-          <p className="eyebrow">Previous Workout</p>
-          <h2>{workout.session ? formatDate(workout.session.started_at) : "No prior sets"}</h2>
+          <p className="eyebrow">Exercise insight</p>
+          <h2>{mode === "previous" ? "Last workout" : mode === "pr" ? "Personal record" : "Last time + PR"}</h2>
         </div>
-        {workout.sets.length > 0 && <span>{workout.sets.length} sets</span>}
+        {showPrevious && insight.sets.length > 0 && <span>{insight.sets.length} sets</span>}
       </div>
 
-      {workout.loading && <p className="empty-state">Loading previous workout...</p>}
-      {!workout.loading && workout.sets.length === 0 && (
+      {insight.loading && <p className="empty-state">Loading exercise stats...</p>}
+      {!insight.loading && showPr && (
+        <div className="pr-display">
+          <span>All-time best weight</span>
+          <strong>{insight.pr == null ? "No PR yet" : `${formatWeight(insight.pr)} lb`}</strong>
+        </div>
+      )}
+      {!insight.loading && showPrevious && insight.sets.length === 0 && (
         <p className="empty-state">This exercise has no previous workout yet.</p>
       )}
-      {!workout.loading && workout.sets.length > 0 && (
+      {!insight.loading && showPrevious && insight.sets.length > 0 && (
         <>
+          <p className="insight-date">{formatDate(insight.session.started_at)}</p>
           <div className="previous-summary">
             <div>
               <span>Best</span>
@@ -610,7 +646,7 @@ function PreviousWorkoutPanel({ workout }) {
             </div>
           </div>
           <div className="previous-sets">
-            {workout.sets.map((set) => (
+            {insight.sets.map((set) => (
               <div key={set.id}>
                 <span>Set {set.set_order}</span>
                 <strong>{formatLoad(set)}</strong>
@@ -1529,6 +1565,57 @@ function wrapPdfText(text, size, maxWidth) {
 
 function escapePdfText(value) {
   return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
+}
+
+const insightOptions = [
+  {
+    id: "previous",
+    title: "Last workout",
+    description: "See the sets, best set, and volume from the last time you trained that exercise.",
+  },
+  {
+    id: "pr",
+    title: "Personal record",
+    description: "Keep the focus on your all-time heaviest weight for the selected exercise.",
+  },
+  {
+    id: "both",
+    title: "Both",
+    description: "Show your personal record together with all the details from your last workout.",
+  },
+];
+
+function SettingsView({ settings, onChange }) {
+  return (
+    <section className="settings-view">
+      <div className="settings-heading">
+        <p className="eyebrow">During a workout</p>
+        <h2>Exercise insights</h2>
+        <p>Choose what appears after you select an exercise.</p>
+      </div>
+      <div className="setting-options" role="radiogroup" aria-label="Exercise insight preference">
+        {insightOptions.map((option) => {
+          const selected = settings.exerciseInsight === option.id;
+          return (
+            <button
+              key={option.id}
+              className={selected ? "setting-option selected" : "setting-option"}
+              role="radio"
+              aria-checked={selected}
+              onClick={() => onChange({ ...settings, exerciseInsight: option.id })}
+            >
+              <span className="setting-radio">{selected && <Check size={16} />}</span>
+              <span>
+                <strong>{option.title}</strong>
+                <small>{option.description}</small>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="settings-note">This preference is saved on this device and applies immediately.</p>
+    </section>
+  );
 }
 
 function ProgressView({ api }) {

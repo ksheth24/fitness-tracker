@@ -339,7 +339,7 @@ h3 { font-size: 15px; }
   z-index: 10;
   display: grid;
   max-width: 560px;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 3px;
   margin: 0 auto;
   padding: 6px;
@@ -988,6 +988,114 @@ input, select {
 .bottom-nav button.active svg { color: var(--lime); }
 
 .metric-grid { gap: 1px; margin-top: 8px !important; background: var(--ink); }
+
+.pr-display {
+  display: grid;
+  gap: 4px;
+  border: 2px solid var(--ink);
+  background: var(--lime);
+  padding: 16px;
+}
+
+.pr-display span,
+.insight-date {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.pr-display strong {
+  color: var(--ink);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.insight-date { margin-bottom: -6px; }
+
+.settings-view {
+  display: grid;
+  gap: 22px;
+  padding: 20px 16px 40px;
+}
+
+.settings-heading {
+  display: grid;
+  gap: 7px;
+  padding-bottom: 16px;
+  border-bottom: 2px solid var(--ink);
+}
+
+.settings-heading h2 {
+  font-size: 25px;
+  text-transform: uppercase;
+}
+
+.settings-heading > p:last-child,
+.settings-note {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.setting-options {
+  display: grid;
+  gap: 10px;
+}
+
+.setting-option {
+  display: grid;
+  grid-template-columns: 30px 1fr;
+  align-items: start;
+  gap: 13px;
+  width: 100%;
+  border: 2px solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  padding: 16px;
+  text-align: left;
+}
+
+.setting-option.selected {
+  background: var(--lime);
+  box-shadow: 5px 5px 0 var(--ink);
+}
+
+.setting-radio {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+}
+
+.setting-option.selected .setting-radio {
+  background: var(--ink);
+  color: var(--lime);
+}
+
+.setting-option > span:last-child {
+  display: grid;
+  gap: 5px;
+}
+
+.setting-option strong {
+  font-size: 16px;
+  text-transform: uppercase;
+}
+
+.setting-option small {
+  color: #615e57;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.settings-note {
+  border-left: 3px solid var(--lime);
+  padding-left: 12px;
+  font-size: 12px;
+}
 
 .metric-grid div,
 .metric-grid div:first-child {
